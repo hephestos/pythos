@@ -1,0 +1,9 @@
+<h1>Discovery control interface</h1>
+
+<form action="{% url 'discovery:control' %}" method="post">
+<table>
+{% csrf_token %}
+{{ form }}
+<tr><th></th><td><input type="submit" value="Launch" /></td></tr>
+</table>
+</form>
