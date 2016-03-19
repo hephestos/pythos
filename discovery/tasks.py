@@ -74,7 +74,7 @@ def ProcessPacket(p,current_sensor):
 
         # Save the source interface
         try:
-            src_interface = Interface.objects.get ( address_ether=p[Ether].src, address_inet=p[IP].src )
+            src_interface = Interface.objects.get ( address_ether=p[Ether].src, address_inet=p[IP].src, sensor=current_sensor )
 
             setattr(src_interface, 'tx_pkts', src_interface.tx_pkts + 1)
             setattr(src_interface, 'tx_bytes', src_interface.tx_bytes + p.len)
@@ -96,7 +96,7 @@ def ProcessPacket(p,current_sensor):
 
         # Save the destination interface
         try:
-            dst_interface = Interface.objects.get ( address_ether=p[Ether].dst, address_inet=p[IP].dst )
+            dst_interface = Interface.objects.get ( address_ether=p[Ether].dst, address_inet=p[IP].dst, sensor=current_sensor )
 
             setattr(dst_interface, 'rx_pkts', dst_interface.rx_pkts + 1)
             setattr(dst_interface, 'rx_bytes', dst_interface.rx_bytes + p.len)

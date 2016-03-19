@@ -1,9 +1,9 @@
-{% if hosts_list %}
+{% if interface_list %}
         <ul>
-        {% for host in hosts_list %}
-                <li>{{ host.address_inet }}, {{ host.address_ether }}, {{ host.last_seen }}</li>
+        {% for interface in interface_list %}
+                <li>{{ interface.address_inet }}, {{ interface.address_ether }}, {{ interface.last_seen }}</li>
         {% endfor %}
         </ul>
 {% else %}
-        <p>No hosts are available.</p>
+        <p>No interfaces are available.</p>
 {% endif %}

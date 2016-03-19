@@ -8,16 +8,16 @@ from macaddress import format_mac
 import netifaces
 import pyshark
 
-from .models import Host
+from .models import Interface
 from .forms import ControlForm
 from .tasks import DiscoveryTask
 
 class IndexView(generic.ListView):
         template_name = 'discovery/index.html'
-        context_object_name = 'hosts_list'
+        context_object_name = 'interface_list'
 
         def get_queryset(self):
-                return Host.objects.order_by('address_inet')
+                return Interface.objects.order_by('address_inet')
 
 def ControlView(request):
         if request.method == 'POST':
@@ -33,3 +33,4 @@ def ControlView(request):
                 form = ControlForm()
 
         return render(request, 'discovery/control.html', {'form': form})
+
