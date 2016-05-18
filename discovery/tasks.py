@@ -8,13 +8,15 @@ from celery import shared_task
 from django.utils import timezone
 from netaddr import IPNetwork
 
-from .models import Host, Interface, Net, Port, Connection, DNScache
-from config.models import Sensor
+from .models import System, Interface, Net, Socket, Connection, DNScache
+from config.models import Origin 
+
+import yappi
 
 lock = allocate_lock()
 packets=list()
 
-sensor_uuid="d44d8aa8c5ef495f992d7531336784fe"
+origin_uuid="d44d8aa8c5ef495f992d7531336784fe"
 
 def AddPacket(pkt):
         global packets
@@ -30,9 +32,35 @@ def RunCapture(interface, duration):
         lock.release()
 
 @shared_task
+def PcapTask(filepath,origin_description):
+
+        packets = sniff(offline=filepath,count=1000)
+
+        current_origin = Origin.objects.create( name="PCAP " + filepath,
+                                                description=origin_description,
+                                                sensor_flag=True,
+                                                plant_flag=False )
+        yappi.start()
+
+        while packets:
+                if threading.active_count() < 10:
+                        # Get next packet from the queue (FIFO)
+                        lock.acquire()
+                        newPacket = packets.pop(0)
+                        lock.release()
+
+                        threading.Thread(target=ProcessPacket,args=(newPacket,current_origin)).start()
+        
+                if len(packets) % 10 == 0:
+                        print(str(len(packets)) + " packets from pcap in queue. " + str(threading.active_count()) + " thread(s) active.")
+        
+        yappi.get_func_stats().print_all()
+        yappi.get_thread_stats().print_all()
+
+@shared_task
 def DiscoveryTask(interface, duration):
 
-        global sniffing, packets, sensor_uuid
+        global sniffing, packets, origin_uuid
 
         sleeptime = 0
 
@@ -43,10 +71,10 @@ def DiscoveryTask(interface, duration):
         # Interface.objects.all().delete()
         
         try:
-                current_sensor = Sensor.objects.get ( uuid=sensor_uuid )
+                current_origin = Origin.objects.get ( uuid=origin_uuid )
     
         except:
-                print("Could not find specified sensor: " + sensor_uuid + " Aborting.")
+                print("Could not find specified origin: " + origin_uuid + " Aborting.")
                 return
 
         while sniffing or packets:
@@ -57,16 +85,16 @@ def DiscoveryTask(interface, duration):
                                 # Get next packet from the queue (FIFO)
                                 newPacket = packets.pop(0)
 
-                                threading.Thread(target=ProcessPacket,args=(newPacket,current_sensor)).start()
+                                threading.Thread(target=ProcessPacket,args=(newPacket,current_origin)).start()
         
                         if len(packets) % 10 == 0:
-                                print(str(len(packets)) + " packets in queue. " + str(threading.active_count()) + " thread(s) active.")
+                                print(str(len(packets)) + " packets from live capture in queue. " + str(threading.active_count()) + " thread(s) active.")
                 else:
                         pass
 #                        sleeptime += 1
 #                        time.sleep(sleeptime)
 
-def ProcessPacket(p,current_sensor):
+def ProcessPacket(p,current_origin):
 
         # see whether we like the package or not
         if not (p.haslayer(Ether) and p.haslayer(IP)):
@@ -74,7 +102,7 @@ def ProcessPacket(p,current_sensor):
 
         # Save the source interface
         try:
-            src_interface = Interface.objects.get ( address_ether=p[Ether].src, address_inet=p[IP].src, sensor=current_sensor )
+            src_interface = Interface.objects.get ( address_ether=p[Ether].src, address_inet=p[IP].src, origin=current_origin )
 
             setattr(src_interface, 'tx_pkts', src_interface.tx_pkts + 1)
             setattr(src_interface, 'tx_bytes', src_interface.tx_bytes + p.len)
@@ -88,15 +116,20 @@ def ProcessPacket(p,current_sensor):
                                                           tx_bytes=p.len,
                                                           first_seen=timezone.now(),
                                                           last_seen=timezone.now(),
-                                                          sensor=current_sensor )
+                                                          origin=current_origin )
         except AttributeError:
                 print('Raised AttributeError when reading source from package:')
                 print(p.summary)
                 return
 
+        except Interface.IntegrityError:
+                # Since we are not thread-safe,
+                # we ignore attempts to create duplicate entries
+                pass
+
         # Save the destination interface
         try:
-            dst_interface = Interface.objects.get ( address_ether=p[Ether].dst, address_inet=p[IP].dst, sensor=current_sensor )
+            dst_interface = Interface.objects.get ( address_ether=p[Ether].dst, address_inet=p[IP].dst, origin=current_origin )
 
             setattr(dst_interface, 'rx_pkts', dst_interface.rx_pkts + 1)
             setattr(dst_interface, 'rx_bytes', dst_interface.rx_bytes + p.len)
@@ -110,30 +143,35 @@ def ProcessPacket(p,current_sensor):
                                                           rx_bytes=p.len,
                                                           first_seen=timezone.now(),
                                                           last_seen=timezone.now(),
-                                                          sensor=current_sensor )
+                                                          origin=current_origin )
         except AttributeError:
                 print('Raised AttributeError when reading destination from package:')
                 print(p.summary())
                 return
 
-        # Update the ports
+        except Interface.IntegrityError:
+                # Since we are not thread-safe,
+                # we ignore attempts to create duplicate entries
+                pass
+
+        # Update the sockets
         try:
                 if p[Ether].type == 0x0800: # IPv4
-                        src_port, new_src_port = Port.objects.get_or_create( interface=src_interface,
-                                                                             port=p[IP].sport,
-                                                                             proto=p[IP].proto )
+                        src_socket, new_src_socket = Socket.objects.get_or_create( interface=src_interface,
+                                                                                     port=p[IP].sport,
+                                                                                     protocol_l4=p[IP].proto )
 
-                        dst_port, new_dst_port = Port.objects.get_or_create( interface=dst_interface,
-                                                                             port=p[IP].dport,
-                                                                             proto=p[IP].proto )
+                        dst_socket, new_dst_socket = Socket.objects.get_or_create( interface=dst_interface,
+                                                                                     port=p[IP].dport,
+                                                                                     protocol_l4=p[IP].proto )
                 elif p[Ether].type == 0x86DD: # IPv6
-                        src_port, new_src_port = Port.objects.get_or_create( interface=src_interface,
-                                                                             port=p[IP].sport,
-                                                                             proto=p[IP].nh )
+                        src_socket, new_src_socket = Socket.objects.get_or_create( interface=src_interface,
+                                                                                     port=p[IP].sport,
+                                                                                     protocol_l4=p[IP].nh )
 
-                        dst_port, new_dst_port = Port.objects.get_or_create( interface=dst_interface,
-                                                                             port=p[IP].dport,
-                                                                             proto=p[IP].nh )
+                        dst_socket, new_dst_socket = Socket.objects.get_or_create( interface=dst_interface,
+                                                                                     port=p[IP].dport,
+                                                                                     protocol_l4=p[IP].nh )
                 else:
                         # If we don't understand the protocol skip to the next package
                         return
@@ -143,9 +181,9 @@ def ProcessPacket(p,current_sensor):
                 print(p.summary())
                 return
 
-        except Port.IntegrityError:
+        except Socket.IntegrityError:
                 # Since get_or_create is not thread-safe,
-                # we ignore attempts of creating duplicate entries
+                # we ignore attempts to create duplicate entries
                 pass
 
         # Find DNS records
@@ -198,9 +236,9 @@ def ProcessPacket(p,current_sensor):
 
         # Update the connections
         try:
-                con = Connection.objects.get( src_port=src_port,
-                                              dst_port=dst_port,
-                                              proto=p.proto )
+                con = Connection.objects.get( src_socket=src_socket,
+                                              dst_socket=dst_socket,
+                                              protocol_l567=p.proto )
 
                 if p.proto == 6: # Check if this is a TCP connection 
                         setattr(con, 'seq', p.seq)
@@ -213,24 +251,25 @@ def ProcessPacket(p,current_sensor):
 
         except Connection.DoesNotExist:
                 if p.proto==6:
-                        con = Connection.objects.create( src_port=src_port,
-                                                         dst_port=dst_port,
-                                                         proto=p.proto,
+                        con = Connection.objects.create( src_socket=src_socket,
+                                                         dst_socket=dst_socket,
+                                                         protocol_l567=p.proto,
                                                          first_seen=timezone.now(),
                                                          seq=p.seq )
                 else:
-                        con = Connection.objects.create( src_port=src_port,
-                                                         dst_port=dst_port,
-                                                         proto=p.proto,
-                                                         first_seen=timezone.now() )
+                        con = Connection.objects.create( src_socket=src_socket,
+                                                 dst_socket=dst_socket,
+                                                 protocol_l567=p.proto,
+                                                 first_seen=timezone.now() )
 
                 new_con = True
 
         except Connection.IntegrityError:
                 # Since we are not thread-safe,
-                # we ignore attempts of creating duplicate entries
+                # we ignore attempts to create duplicate entries
                 pass
 
         except Connection.MultipleObjectsReturned:
                 # This shouldn't happen, but in case it does we will skip to the next package
                 return
+

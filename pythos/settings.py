@@ -23,7 +23,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SECRET_KEY = '_3@tj1hh_6@90b9^vw&$m1&bz3m(3gjxf7d-fa))q1w=x7ex*k'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+DEBUG = True
 
 ALLOWED_HOSTS = ['localhost']
 
@@ -44,6 +44,7 @@ INSTALLED_APPS = (
 #    'otp_yubikey',
     'djcelery',
     'kombu.transport.django',
+    'kb',
     'discovery',
     'config',
 )
@@ -92,6 +93,7 @@ DATABASES = {
         'PASSWORD': 'pythos',
         'HOST': 'localhost',
         'PORT': '',
+        'CONN_MAX_AGE': 600,
     }
 }
 

@@ -5,7 +5,7 @@ from macaddress.fields import MACAddressField
 
 class Site(models.Model):
         name          = models.CharField(max_length=127)
-        description   = models.TextField
+        description   = models.TextField(null=True)
 
 class Interface(models.Model):
         name          = models.CharField(max_length=127)
@@ -14,13 +14,15 @@ class Interface(models.Model):
 class Service(models.Model):
         port          = models.IntegerField(default=0)
         name          = models.CharField(max_length=127)
-        description   = models.TextField
+        description   = models.TextField(null=True)
 
 class Vendor(models.Model):
         name          = models.CharField(max_length=127)
-        address_ether = MACAddressField
+        address_ether = MACAddressField(null=True)
 
-class Sensor(models.Model):
+class Origin(models.Model):
         uuid          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
         name          = models.CharField(max_length=127)
-        description   = models.TextField
+        description   = models.TextField(null=True)
+        sensor_flag   = models.BooleanField()
+        plant_flag    = models.BooleanField()

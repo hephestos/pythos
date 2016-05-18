@@ -28,3 +28,15 @@ class ControlForm(forms.Form):
                                       widget=forms.Select,
                                       required=True)
 
+class PcapForm(forms.Form):
+        def __init__(self, *args, **kwargs):
+                super(PcapForm, self).__init__(*args, **kwargs)
+                self.fields['filepath'] = forms.FilePathField(label='Select pcap file',
+                                                              path='/home/hephestos/pcap',
+                                                              recursive=True,
+                                                              allow_files=True,
+                                                              allow_folders=False,
+                                                              required=True)
+
+        origin_description = forms.CharField(label='Origin description',
+                                             required=True)
