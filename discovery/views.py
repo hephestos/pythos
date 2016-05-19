@@ -4,13 +4,16 @@ from django.core.urlresolvers import reverse
 from django.template import RequestContext, loader
 from django.views import generic
 from macaddress import format_mac
+from django_tables2 import RequestConfig
 
 import netifaces
 import pyshark
 
-from .models import Interface
+from .models import Interface, Connection
 from .forms import ControlForm, PcapForm
 from .tasks import DiscoveryTask, PcapTask
+
+from discovery.tables import ConversationsTable
 
 class IndexView(generic.ListView):
         template_name = 'discovery/index.html'
@@ -48,3 +51,11 @@ def PcapView(request):
                 form = PcapForm()
 
         return render(request, 'discovery/pcap.html', {'form': form})
+
+def EndpointsView(request):
+        return render(request, 'discovery/endpoints.html', {'endpoints': Interface.objects.all()})
+
+def ConversationsView(request):
+        table = ConversationsTable(Connection.objects.all())
+        RequestConfig(request).configure(table)
+        return render(request, 'discovery/conversations.html', {'table': table})

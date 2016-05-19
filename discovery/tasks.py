@@ -6,6 +6,7 @@ from scapy.all import *
 from celery import shared_task
 from django.utils import timezone
 from netaddr import IPNetwork
+from django.db import IntegrityError
 
 from .models import System, Interface, Net, Socket, Connection, DNScache
 from config.models import Origin 
@@ -30,7 +31,8 @@ def RunCapture(interface, duration):
 @shared_task
 def PcapTask(filepath,origin_description):
 
-        packets = sniff(offline=filepath,count=1000)
+#        packets = sniff(offline=filepath,count=1000)
+        packets = sniff(offline=filepath, count=100000)
 
         current_origin = Origin.objects.create( name="PCAP " + filepath,
                                                 description=origin_description,
@@ -41,7 +43,7 @@ def PcapTask(filepath,origin_description):
         lock = threading.Lock()
 
         while packets:
-                if threading.active_count() < 10:
+                if threading.active_count() < 3:
                         # Get next packet from the queue (FIFO)
                         newPacket = packets.pop(0)
 
@@ -122,11 +124,11 @@ def ProcessPacket(p,current_origin,lock):
                 lock.release()
                 return
 
-        except Interface.IntegrityError:
+        except IntegrityError:
                 # Since we are not thread-safe,
                 # we ignore attempts to create duplicate entries
                 pass
-        
+
         lock.release()
 
         # Save the destination interface
@@ -154,7 +156,7 @@ def ProcessPacket(p,current_origin,lock):
                 lock.release()
                 return
 
-        except Interface.IntegrityError:
+        except IntegrityError:
                 # Since we are not thread-safe,
                 # we ignore attempts to create duplicate entries
                 pass
