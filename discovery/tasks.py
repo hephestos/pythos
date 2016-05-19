@@ -1,5 +1,4 @@
 from __future__ import absolute_import
-from _thread import start_new_thread, allocate_lock
 import time
 import threading
 from scapy.all import *
@@ -13,7 +12,6 @@ from config.models import Origin
 
 import yappi
 
-lock = allocate_lock()
 packets=list()
 
 origin_uuid="d44d8aa8c5ef495f992d7531336784fe"
@@ -23,13 +21,11 @@ def AddPacket(pkt):
         packets.extend(pkt)
 
 def RunCapture(interface, duration):
-        global sniffing, lock, packets
+        global sniffing, packets
 
         sniff(iface=interface, timeout=float(duration), store=0, prn=AddPacket)
 
-        lock.acquire()
         sniffing = False
-        lock.release()
 
 @shared_task
 def PcapTask(filepath,origin_description):
@@ -40,22 +36,21 @@ def PcapTask(filepath,origin_description):
                                                 description=origin_description,
                                                 sensor_flag=True,
                                                 plant_flag=False )
-        yappi.start()
+#        yappi.start()
+
+        lock = threading.Lock()
 
         while packets:
                 if threading.active_count() < 10:
                         # Get next packet from the queue (FIFO)
-                        lock.acquire()
                         newPacket = packets.pop(0)
-                        lock.release()
 
-                        threading.Thread(target=ProcessPacket,args=(newPacket,current_origin)).start()
+                        threading.Thread(target=ProcessPacket,args=(newPacket,current_origin,lock)).start()
         
-                if len(packets) % 10 == 0:
                         print(str(len(packets)) + " packets from pcap in queue. " + str(threading.active_count()) + " thread(s) active.")
         
-        yappi.get_func_stats().print_all()
-        yappi.get_thread_stats().print_all()
+#        yappi.get_func_stats().print_all()
+#        yappi.get_thread_stats().print_all()
 
 @shared_task
 def DiscoveryTask(interface, duration):
@@ -69,7 +64,9 @@ def DiscoveryTask(interface, duration):
 
         # For testing delete everything from previous captures
         # Interface.objects.all().delete()
-        
+       
+        lock = threading.Lock()
+ 
         try:
                 current_origin = Origin.objects.get ( uuid=origin_uuid )
     
@@ -85,7 +82,7 @@ def DiscoveryTask(interface, duration):
                                 # Get next packet from the queue (FIFO)
                                 newPacket = packets.pop(0)
 
-                                threading.Thread(target=ProcessPacket,args=(newPacket,current_origin)).start()
+                                threading.Thread(target=ProcessPacket,args=(newPacket,current_origin,lock)).start()
         
                         if len(packets) % 10 == 0:
                                 print(str(len(packets)) + " packets from live capture in queue. " + str(threading.active_count()) + " thread(s) active.")
@@ -94,7 +91,7 @@ def DiscoveryTask(interface, duration):
 #                        sleeptime += 1
 #                        time.sleep(sleeptime)
 
-def ProcessPacket(p,current_origin):
+def ProcessPacket(p,current_origin,lock):
 
         # see whether we like the package or not
         if not (p.haslayer(Ether) and p.haslayer(IP)):
@@ -102,13 +99,15 @@ def ProcessPacket(p,current_origin):
 
         # Save the source interface
         try:
+            lock.acquire()
+
             src_interface = Interface.objects.get ( address_ether=p[Ether].src, address_inet=p[IP].src, origin=current_origin )
 
             setattr(src_interface, 'tx_pkts', src_interface.tx_pkts + 1)
             setattr(src_interface, 'tx_bytes', src_interface.tx_bytes + p.len)
 
             src_interface.save()
- 
+
         except Interface.DoesNotExist:
                 src_interface = Interface.objects.create( address_ether=p[Ether].src,
                                                           address_inet=p[IP].src,
@@ -120,22 +119,27 @@ def ProcessPacket(p,current_origin):
         except AttributeError:
                 print('Raised AttributeError when reading source from package:')
                 print(p.summary)
+                lock.release()
                 return
 
         except Interface.IntegrityError:
                 # Since we are not thread-safe,
                 # we ignore attempts to create duplicate entries
                 pass
+        
+        lock.release()
 
         # Save the destination interface
         try:
+            lock.acquire()
+
             dst_interface = Interface.objects.get ( address_ether=p[Ether].dst, address_inet=p[IP].dst, origin=current_origin )
 
             setattr(dst_interface, 'rx_pkts', dst_interface.rx_pkts + 1)
             setattr(dst_interface, 'rx_bytes', dst_interface.rx_bytes + p.len)
 
             dst_interface.save()
- 
+
         except Interface.DoesNotExist:
                 dst_interface = Interface.objects.create( address_ether=p[Ether].dst,
                                                           address_inet=p[IP].dst,
@@ -147,6 +151,7 @@ def ProcessPacket(p,current_origin):
         except AttributeError:
                 print('Raised AttributeError when reading destination from package:')
                 print(p.summary())
+                lock.release()
                 return
 
         except Interface.IntegrityError:
@@ -154,8 +159,11 @@ def ProcessPacket(p,current_origin):
                 # we ignore attempts to create duplicate entries
                 pass
 
+        lock.release()
+
         # Update the sockets
         try:
+                lock.acquire()
                 if p[Ether].type == 0x0800: # IPv4
                         src_socket, new_src_socket = Socket.objects.get_or_create( interface=src_interface,
                                                                                      port=p[IP].sport,
@@ -164,6 +172,7 @@ def ProcessPacket(p,current_origin):
                         dst_socket, new_dst_socket = Socket.objects.get_or_create( interface=dst_interface,
                                                                                      port=p[IP].dport,
                                                                                      protocol_l4=p[IP].proto )
+
                 elif p[Ether].type == 0x86DD: # IPv6
                         src_socket, new_src_socket = Socket.objects.get_or_create( interface=src_interface,
                                                                                      port=p[IP].sport,
@@ -172,19 +181,24 @@ def ProcessPacket(p,current_origin):
                         dst_socket, new_dst_socket = Socket.objects.get_or_create( interface=dst_interface,
                                                                                      port=p[IP].dport,
                                                                                      protocol_l4=p[IP].nh )
+
                 else:
                         # If we don't understand the protocol skip to the next package
+                        lock.release()
                         return
 
         except AttributeError:
                 print('Raised AttributeError when reading ports from package:')
                 print(p.summary())
+                lock.release()
                 return
 
-        except Socket.IntegrityError:
+        except IntegrityError:
                 # Since get_or_create is not thread-safe,
                 # we ignore attempts to create duplicate entries
                 pass
+
+        lock.release()
 
         # Find DNS records
         if p[2].sport == 53:
@@ -236,6 +250,8 @@ def ProcessPacket(p,current_origin):
 
         # Update the connections
         try:
+                lock.acquire()
+
                 con = Connection.objects.get( src_socket=src_socket,
                                               dst_socket=dst_socket,
                                               protocol_l567=p.proto )
@@ -264,12 +280,14 @@ def ProcessPacket(p,current_origin):
 
                 new_con = True
 
-        except Connection.IntegrityError:
+        except IntegrityError:
                 # Since we are not thread-safe,
                 # we ignore attempts to create duplicate entries
                 pass
 
         except Connection.MultipleObjectsReturned:
                 # This shouldn't happen, but in case it does we will skip to the next package
+                lock.release()
                 return
 
+        lock.release()
