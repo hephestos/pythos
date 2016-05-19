@@ -8,7 +8,7 @@ class ConversationsTable(tables.Table):
         dst_addr = tables.Column(accessor='dst_socket.interface.address_ether')
 
         class Meta:
-                fields = ['src_addr','src_port','dst_addr','dst_port','tx_pkts','tx_bytes','rx_pkts','rx_bytes']
+                fields = ['src_addr','src_port','dst_addr','dst_port','tx_pkts','tx_bytes']
                 model = Connection
                 # add class="paleblue" to <table> tag
                 attrs = {"class": "paleblue"}
