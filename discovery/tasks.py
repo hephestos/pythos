@@ -7,6 +7,7 @@ from celery import shared_task
 from django.utils import timezone
 from netaddr import IPNetwork
 from django.db import IntegrityError
+from django.db import connection as db_connection
 
 from .models import System, Interface, Net, Socket, Connection, DNScache
 from config.models import Origin 
@@ -43,7 +44,7 @@ def PcapTask(filepath,origin_description):
         lock = threading.Lock()
 
         while packets:
-                if threading.active_count() < 3:
+                if threading.active_count() < 4:
                         # Get next packet from the queue (FIFO)
                         newPacket = packets.pop(0)
 
@@ -122,6 +123,7 @@ def ProcessPacket(p,current_origin,lock):
                 print('Raised AttributeError when reading source from package:')
                 print(p.summary)
                 lock.release()
+                db_connection.close()
                 return
 
         except IntegrityError:
@@ -154,6 +156,7 @@ def ProcessPacket(p,current_origin,lock):
                 print('Raised AttributeError when reading destination from package:')
                 print(p.summary())
                 lock.release()
+                db_connection.close()
                 return
 
         except IntegrityError:
@@ -187,12 +190,14 @@ def ProcessPacket(p,current_origin,lock):
                 else:
                         # If we don't understand the protocol skip to the next package
                         lock.release()
+                        db_connection.close()
                         return
 
         except AttributeError:
                 print('Raised AttributeError when reading ports from package:')
                 print(p.summary())
                 lock.release()
+                db_connection.close()
                 return
 
         except IntegrityError:
@@ -290,6 +295,8 @@ def ProcessPacket(p,current_origin,lock):
         except Connection.MultipleObjectsReturned:
                 # This shouldn't happen, but in case it does we will skip to the next package
                 lock.release()
+                db_connection.close()
                 return
 
         lock.release()
+        db_connection.close()
