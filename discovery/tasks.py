@@ -2,6 +2,9 @@ from __future__ import absolute_import
 import time
 import threading
 from scapy.all import *
+from multiprocessing import Pool
+import cProfile
+
 
 from celery import shared_task
 from django.utils import timezone
@@ -13,6 +16,29 @@ from .models import System, Interface, Net, Socket, Connection, DNScache
 from config.models import Origin 
 
 import yappi
+
+### fix to be able to spawn processes from a celery task
+from celery.signals import worker_process_init
+from multiprocessing import current_process
+
+@worker_process_init.connect
+def fix_multiprocessing(**kwargs):
+    try:
+        current_process()._config
+    except AttributeError:
+        current_process()._config = {'semprefix': '/mp'}
+
+### fix to allow pickling from within a subproces
+import dill
+
+def run_dill_encoded(what):
+    fun, args = dill.loads(what)
+    return fun(*args)
+
+def apply_async(pool, fun, args):
+    return pool.apply_async(run_dill_encoded, (dill.dumps((fun, args)),))
+
+###
 
 packets=list()
 
@@ -32,28 +58,38 @@ def RunCapture(interface, duration):
 @shared_task
 def PcapTask(filepath,origin_description):
 
-#        packets = sniff(offline=filepath,count=1000)
-        packets = sniff(offline=filepath, count=100000)
+        packets = sniff(offline=filepath,count=100)
 
         current_origin = Origin.objects.create( name="PCAP " + filepath,
                                                 description=origin_description,
                                                 sensor_flag=True,
                                                 plant_flag=False )
-#        yappi.start()
 
+        # For testing delete everything from previous captures
+        Interface.objects.all().delete()
+        
         lock = threading.Lock()
 
-        while packets:
-                if threading.active_count() < 4:
-                        # Get next packet from the queue (FIFO)
-                        newPacket = packets.pop(0)
+        num_packets = len(packets)
+ 
 
-                        threading.Thread(target=ProcessPacket,args=(newPacket,current_origin,lock)).start()
+        pool = Pool()
+
+        while packets:
+
+                if num_packets % 10 == 0:
+                        print(str(num_packets) + " packets from pcap in queue.")
+
+                
+                # Get next packet from the queue (FIFO)
+                newPacket = packets.pop(0)
+                num_packets = num_packets - 1
+                #apply_async(pool, ProcessPacket, args=(newPacket,current_origin,lock))
+                cProfile.run('ProcessPacket(newPacket,current_origin,lock)')
+
         
-                        print(str(len(packets)) + " packets from pcap in queue. " + str(threading.active_count()) + " thread(s) active.")
-        
-#        yappi.get_func_stats().print_all()
-#        yappi.get_thread_stats().print_all()
+        pool.close()
+        pool.join()
 
 @shared_task
 def DiscoveryTask(interface, duration):
@@ -95,6 +131,7 @@ def DiscoveryTask(interface, duration):
 #                        time.sleep(sleeptime)
 
 def ProcessPacket(p,current_origin,lock):
+        db_connection.close()
 
         # see whether we like the package or not
         if not (p.haslayer(Ether) and p.haslayer(IP)):
@@ -104,7 +141,7 @@ def ProcessPacket(p,current_origin,lock):
         try:
             lock.acquire()
 
-            src_interface = Interface.objects.get ( address_ether=p[Ether].src, address_inet=p[IP].src, origin=current_origin )
+            src_interface = Interface.objects.get ( address_ether=p[Ether].src, address_inet=p[IP].src, origin=current_origin, ttl_seen=p[IP].ttl )
 
             setattr(src_interface, 'tx_pkts', src_interface.tx_pkts + 1)
             setattr(src_interface, 'tx_bytes', src_interface.tx_bytes + p.len)
@@ -116,6 +153,7 @@ def ProcessPacket(p,current_origin,lock):
                                                           address_inet=p[IP].src,
                                                           tx_pkts=1,
                                                           tx_bytes=p.len,
+                                                          ttl_seen=p[IP].ttl,
                                                           first_seen=timezone.now(),
                                                           last_seen=timezone.now(),
                                                           origin=current_origin )
@@ -137,7 +175,7 @@ def ProcessPacket(p,current_origin,lock):
         try:
             lock.acquire()
 
-            dst_interface = Interface.objects.get ( address_ether=p[Ether].dst, address_inet=p[IP].dst, origin=current_origin )
+            dst_interface = Interface.objects.get ( address_ether=p[Ether].dst, address_inet=p[IP].dst, origin=current_origin, ttl_seen=p[IP].ttl )
 
             setattr(dst_interface, 'rx_pkts', dst_interface.rx_pkts + 1)
             setattr(dst_interface, 'rx_bytes', dst_interface.rx_bytes + p.len)
@@ -149,6 +187,7 @@ def ProcessPacket(p,current_origin,lock):
                                                           address_inet=p[IP].dst,
                                                           rx_pkts=1,
                                                           rx_bytes=p.len,
+                                                          ttl_seen=p[IP].ttl,
                                                           first_seen=timezone.now(),
                                                           last_seen=timezone.now(),
                                                           origin=current_origin )
