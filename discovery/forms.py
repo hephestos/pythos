@@ -32,7 +32,7 @@ class PcapForm(forms.Form):
         def __init__(self, *args, **kwargs):
                 super(PcapForm, self).__init__(*args, **kwargs)
                 self.fields['filepath'] = forms.FilePathField(label='Select pcap file',
-                                                              path='/home/hephestos/pcap',
+                                                              path='/home/scout/ICSsec/sites',
                                                               recursive=True,
                                                               match="\.pcap$",
                                                               allow_files=True,

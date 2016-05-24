@@ -3,8 +3,7 @@ import time
 import threading
 from scapy.all import *
 from multiprocessing import Pool
-import cProfile
-
+from collections import deque
 
 from celery import shared_task
 from django.utils import timezone
@@ -40,25 +39,29 @@ def apply_async(pool, fun, args):
 
 ###
 
-packets=list()
-
 origin_uuid="d44d8aa8c5ef495f992d7531336784fe"
 
-def AddPacket(pkt):
-        global packets
-        packets.extend(pkt)
+def AddPacket(packets):
+        def add_to_queue(pkt):
+            packets.append(pkt)
 
-def RunCapture(interface, duration):
-        global sniffing, packets
+        return add_to_queue
 
-        sniff(iface=interface, timeout=float(duration), store=0, prn=AddPacket)
+def RunCapture(interface, duration, packets):
+        sniff(iface=interface, timeout=float(duration), store=0, prn=AddPacket(packets))
 
-        sniffing = False
+def ReadPcap(filepath, packets):
+        sniff(offline=filepath,count=100000, prn=AddPacket(packets))
+#        sniff(offline=filepath, prn=AddPacket(packets))
 
 @shared_task
 def PcapTask(filepath,origin_description):
 
-        packets = sniff(offline=filepath,count=100)
+        packets = deque()
+
+        print("Starting to read pcap file: " + filepath)
+        pythos_thread = threading.Thread(target=ReadPcap, args=(filepath, packets))
+        pythos_thread.start()
 
         current_origin = Origin.objects.create( name="PCAP " + filepath,
                                                 description=origin_description,
@@ -68,38 +71,51 @@ def PcapTask(filepath,origin_description):
         # For testing delete everything from previous captures
         Interface.objects.all().delete()
         
-        lock = threading.Lock()
-
-        num_packets = len(packets)
+        num_processes = os.cpu_count()
+        if not num_processes: num_processes = 2
  
-
         pool = Pool()
 
-        while packets:
+        print("Starting " + str(num_processes) + " worker processes.")
+        while pythos_thread.is_alive() or packets:
+                num_packets = len(packets)
+                chunk_size = max((int)(num_packets/num_processes), 1000)
 
-                if num_packets % 10 == 0:
-                        print(str(num_packets) + " packets from pcap in queue.")
+                print(str(num_packets) + " packets from pcap in queue.")
 
-                
-                # Get next packet from the queue (FIFO)
-                newPacket = packets.pop(0)
-                num_packets = num_packets - 1
-                #apply_async(pool, ProcessPacket, args=(newPacket,current_origin,lock))
-                cProfile.run('ProcessPacket(newPacket,current_origin,lock)')
+                if num_packets >= chunk_size:
+                    # Get next packet chunk from the queue (FIFO)
+                    chunk = deque()
+                    for i in range(chunk_size):
+                        chunk.append(packets.popleft())
 
-        
+                    apply_async(pool, packet_chunk, args=(chunk,current_origin))
+
+                elif not pythos_thread.is_alive():
+                    print("Processing last chunk.")
+                    chunk = deque()
+                    for i in range(num_packets):
+                        chunk.append(packets.popleft())
+
+                    apply_async(pool, packet_chunk, args=(chunk,current_origin))
+
+                time.sleep(1)
+
+        pythos_thread.join()
         pool.close()
         pool.join()
+        print("Pcap has been processed successfully.")
 
 @shared_task
 def DiscoveryTask(interface, duration):
 
-        global sniffing, packets, origin_uuid
+        global origin_uuid
 
+        packets = deque()
         sleeptime = 0
 
-        sniffing = True
-        threading.Thread(target=RunCapture, args=(interface, duration)).start()
+        pythos_thread = threading.Thread(target=RunCapture, args=(interface, duration, packets))
+        pythos_thread.start()
 
         # For testing delete everything from previous captures
         # Interface.objects.all().delete()
@@ -113,13 +129,13 @@ def DiscoveryTask(interface, duration):
                 print("Could not find specified origin: " + origin_uuid + " Aborting.")
                 return
 
-        while sniffing or packets:
+        while pythos_thread.is_alive() or packets:
                 if packets:
                         sleeptime = 0
 
                         if threading.active_count() < 10:
                                 # Get next packet from the queue (FIFO)
-                                newPacket = packets.pop(0)
+                                newPacket = packets.popleft()
 
                                 threading.Thread(target=ProcessPacket,args=(newPacket,current_origin,lock)).start()
         
@@ -131,7 +147,6 @@ def DiscoveryTask(interface, duration):
 #                        time.sleep(sleeptime)
 
 def ProcessPacket(p,current_origin,lock):
-        db_connection.close()
 
         # see whether we like the package or not
         if not (p.haslayer(Ether) and p.haslayer(IP)):
@@ -161,7 +176,6 @@ def ProcessPacket(p,current_origin,lock):
                 print('Raised AttributeError when reading source from package:')
                 print(p.summary)
                 lock.release()
-                db_connection.close()
                 return
 
         except IntegrityError:
@@ -195,7 +209,6 @@ def ProcessPacket(p,current_origin,lock):
                 print('Raised AttributeError when reading destination from package:')
                 print(p.summary())
                 lock.release()
-                db_connection.close()
                 return
 
         except IntegrityError:
@@ -229,14 +242,12 @@ def ProcessPacket(p,current_origin,lock):
                 else:
                         # If we don't understand the protocol skip to the next package
                         lock.release()
-                        db_connection.close()
                         return
 
         except AttributeError:
                 print('Raised AttributeError when reading ports from package:')
                 print(p.summary())
                 lock.release()
-                db_connection.close()
                 return
 
         except IntegrityError:
@@ -334,8 +345,17 @@ def ProcessPacket(p,current_origin,lock):
         except Connection.MultipleObjectsReturned:
                 # This shouldn't happen, but in case it does we will skip to the next package
                 lock.release()
-                db_connection.close()
                 return
 
         lock.release()
-        db_connection.close()
+
+def packet_chunk(chunk, current_origin):
+        lock = threading.Lock()
+
+        print("Worker process with PID " + str(os.getpid()) + " has started.")
+        
+        while chunk:
+            next_packet = chunk.popleft()
+            ProcessPacket(next_packet, current_origin, lock)
+        
+        print("Worker process with PID " + str(os.getpid()) + " has finished.")
