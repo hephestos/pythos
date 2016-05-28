@@ -8,4 +8,5 @@ urlpatterns = [
         url(r'^pcap/$', views.PcapView, name='pcap'),
         url(r'^endpoints/$', views.EndpointsView, name='endpoints'),
         url(r'^conversations/$', views.ConversationsView, name='conversations'),
+        url(r'^barchart/', views.demo_discretebarchart, name='demo_discretebarchart'),
 ]

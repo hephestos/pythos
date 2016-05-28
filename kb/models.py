@@ -17,4 +17,4 @@ class ServiceName(models.Model):
 class OperatingSystem(models.Model):
         vendor        = models.CharField(max_length=127)
         product       = models.CharField(max_length=127)
-        default_ttl   = models.IntegerField() 
+        default_ttl   = models.IntegerField()

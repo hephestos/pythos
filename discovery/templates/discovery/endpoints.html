@@ -1,11 +1,15 @@
 {% load staticfiles %}
 {% load render_table from django_tables2 %}
+{% load nvd3_tags %}
 <!doctype html>
 <html>
     <head>
         <link rel="stylesheet" href="{% static "django_tables2/themes/paleblue/css/screen.css" %}" />
+        {% include_chart_jscss %}
+        {% load_chart charttype chartdata chartcontainer %}
     </head>
     <body>
         {% render_table endpoints %}
+        {% include_container chartcontainer 600 1200 %}
     </body>
 </html>

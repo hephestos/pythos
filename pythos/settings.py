@@ -37,6 +37,7 @@ INSTALLED_APPS = (
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'djangobower',
     'django_tables2',
 #    'django_otp',
 #    'django_otp.plugins.otp_static',
@@ -45,9 +46,17 @@ INSTALLED_APPS = (
 #    'otp_yubikey',
     'djcelery',
     'kombu.transport.django',
+    'django_nvd3',
     'kb',
     'discovery',
     'config',
+)
+
+BOWER_INSTALLED_APPS = (
+    'jquery#1.9',
+    'underscore',
+    'd3',
+    'nvd3',
 )
 
 MIDDLEWARE_CLASSES = (
@@ -120,6 +129,14 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATIC_ROOT = '/srv/http/pythos/static/'
 
+BOWER_COMPONENTS_ROOT = os.path.join(BASE_DIR, 'components')
+
+STATICFILES_FINDERS = (
+    'django.contrib.staticfiles.finders.FileSystemFinder',
+    'django.contrib.staticfiles.finders.AppDirectoriesFinder',
+    'djangobower.finders.BowerFinder',
+)
+
 # Security settings
 
 SECURE_SSL_REDIRECT = False # True
@@ -140,3 +157,8 @@ SECURE_HSTS_INCLUDE_SUBDOMAINS = False # True
 
 BROKER_URL = 'django://'
 CELERY_RESULT_BACKEND='djcelery.backends.database:DatabaseBackend'
+
+# fluent dashboard
+ADMIN_TOOLS_INDEX_DASHBOARD = 'fluent_dashboard.dashboard.FluentIndexDashboard'
+ADMIN_TOOLS_APP_INDEX_DASHBOARD = 'fluent_dashboard.dashboard.FluentAppIndexDashboard'
+ADMIN_TOOLS_MENU = 'fluent_dashboard.menu.FluentMenu'

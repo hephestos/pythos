@@ -19,10 +19,9 @@ class Interface(models.Model):
         origin        = models.ForeignKey('config.Origin', null=True, blank=True)
         system        = models.ForeignKey('System', null=True, blank=True)
         net           = models.ForeignKey('Net', null=True, blank=True)
-        address_ether = MACAddressField(null=True, blank=True)
-        ether_vendor  = models.ForeignKey('kb.EtherOUI', related_name='+', null=True, blank=True) 
+        address_ether = MACAddressField(integer=False, null=True, blank=True)
         address_inet  = models.GenericIPAddressField(null=True, blank=True)
-        distance      = models.IntegerField(default=0)
+        distance      = models.IntegerField(default=-1)
         protocol_l3   = models.IntegerField(default=0)
         tx_pkts       = models.BigIntegerField(default=0)
         tx_bytes      = models.BigIntegerField(default=0)
@@ -35,7 +34,7 @@ class Interface(models.Model):
                 unique_together = (('address_ether', 'address_inet', 'origin', 'ttl_seen'),)
 
 class Socket(models.Model):
-        interface     = models.ForeignKey('Interface')
+        interface     = models.ForeignKey('Interface', related_name='sockets')
         port          = models.IntegerField(default=0)
         protocol_l4   = models.IntegerField(default=0)
 #        service_port  = models.ForeignKey('config.Service', related_name='+', default=1)
@@ -46,8 +45,8 @@ class Socket(models.Model):
                 unique_together = (('interface', 'port', 'protocol_l4'),)
 
 class Connection(models.Model):
-        src_socket    = models.ForeignKey('Socket', related_name='+')
-        dst_socket    = models.ForeignKey('Socket', related_name='+')
+        src_socket    = models.ForeignKey('Socket', related_name='src_connections')
+        dst_socket    = models.ForeignKey('Socket', related_name='dst_connections')
         protocol_l567 = models.IntegerField(default=-1)
         seq           = models.BigIntegerField(default=-1, db_index=True)
         tx_pkts       = models.BigIntegerField(default=0)

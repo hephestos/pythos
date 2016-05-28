@@ -10,9 +10,11 @@ from django.utils import timezone
 from netaddr import IPNetwork
 from django.db import IntegrityError
 from django.db import connection as db_connection
+from django.db.models import Sum, Min, Max, Count
 
 from .models import System, Interface, Net, Socket, Connection, DNScache
-from config.models import Origin 
+from config.models import Origin
+from kb.models import OperatingSystem
 
 import yappi
 
@@ -39,49 +41,63 @@ def apply_async(pool, fun, args):
 
 ###
 
-origin_uuid="d44d8aa8c5ef495f992d7531336784fe"
-
-def AddPacket(packets):
+def add_packet(packets):
         def add_to_queue(pkt):
             packets.append(pkt)
 
         return add_to_queue
 
-def RunCapture(interface, duration, packets):
-        sniff(iface=interface, timeout=float(duration), store=0, prn=AddPacket(packets))
+def run_capture(interface, duration, packets):
+        sniff(iface=interface, timeout=float(duration), store=0, prn=add_packet(packets))
 
-def ReadPcap(filepath, packets):
-        sniff(offline=filepath,count=100000, prn=AddPacket(packets))
-#        sniff(offline=filepath, prn=AddPacket(packets))
+def read_pcap(filepath, packets):
+        sniff(offline=filepath,count=100000, prn=add_packet(packets))
+#        sniff(offline=filepath, prn=add_packet(packets))
 
 @shared_task
-def PcapTask(filepath,origin_description):
+def DiscoveryTask(origin_uuid="",
+                  offline=False,
+                  interface="",
+                  duration=0,
+                  filepath="",
+                  origin_description=""):
 
         packets = deque()
 
-        print("Starting to read pcap file: " + filepath)
-        pythos_thread = threading.Thread(target=ReadPcap, args=(filepath, packets))
-        pythos_thread.start()
+        if offline: 
+            current_origin = Origin.objects.create( name="PCAP " + filepath,
+                                                    description=origin_description,
+                                                    sensor_flag=True,
+                                                    plant_flag=False )
 
-        current_origin = Origin.objects.create( name="PCAP " + filepath,
-                                                description=origin_description,
-                                                sensor_flag=True,
-                                                plant_flag=False )
+            discovery_thread = threading.Thread(target=read_pcap, args=(filepath, packets))
+            print("Starting to read pcap file: " + filepath)
+        else:
+            try:
+                current_origin = Origin.objects.get ( uuid=origin_uuid )
+            except:
+                print("Could not find specified origin: " + origin_uuid + " Aborting.")
+                return
+
+            discovery_thread = threading.Thread(target=run_capture, args=(interface, duration, packets))
+            print("Starting live capture on: " + interface)
+        
+        discovery_thread.start()
 
         # For testing delete everything from previous captures
-        Interface.objects.all().delete()
+        # Interface.objects.all().delete()
         
         num_processes = os.cpu_count()
         if not num_processes: num_processes = 2
- 
-        pool = Pool()
+        
+        pool = Pool(processes = num_processes)
 
         print("Starting " + str(num_processes) + " worker processes.")
-        while pythos_thread.is_alive() or packets:
+        while discovery_thread.is_alive() or packets:
                 num_packets = len(packets)
-                chunk_size = max((int)(num_packets/num_processes), 1000)
+                chunk_size = max(num_packets//num_processes, 1000)
 
-                print(str(num_packets) + " packets from pcap in queue.")
+                print(str(num_packets) + " packets in queue.")
 
                 if num_packets >= chunk_size:
                     # Get next packet chunk from the queue (FIFO)
@@ -91,7 +107,7 @@ def PcapTask(filepath,origin_description):
 
                     apply_async(pool, packet_chunk, args=(chunk,current_origin))
 
-                elif not pythos_thread.is_alive():
+                elif not discovery_thread.is_alive():
                     print("Processing last chunk.")
                     chunk = deque()
                     for i in range(num_packets):
@@ -101,52 +117,44 @@ def PcapTask(filepath,origin_description):
 
                 time.sleep(1)
 
-        pythos_thread.join()
+        discovery_thread.join()
         pool.close()
         pool.join()
-        print("Pcap has been processed successfully.")
+
+        if offline:
+            print("Pcap " + filepath + " has been processed successfully.")
+        else:
+            print("Live capture on " + interface + " has been completed.")
 
 @shared_task
-def DiscoveryTask(interface, duration):
+def find_gateways_task(threshold):
+    gateways = Interface.objects.values(
+                    'address_ether',
+                ).annotate(
+                    count_ips      = Count('address_inet', distinct = True),
+                    count_src_cons = Count('sockets__src_connections', distinct = True),
+                    count_dst_cons = Count('sockets__dst_connections', distinct = True),
+                ).filter(
+                    count_ips__gt = threshold,
+                )
 
-        global origin_uuid
+@shared_task
+def set_distances_task():
+    for interface in Interface.objects.all():
+        if interface.ttl_seen > 0:
+            default_ttl = OperatingSystem.objects.filter(
+                                default_ttl__gte = interface.ttl_seen
+                            ).order_by(
+                                'default_ttl'
+                            ).values(
+                                'default_ttl'
+                            ).first()['default_ttl']
+            interface.distance = default_ttl - interface.ttl_seen
+        else:
+            interface.distance = -1
+        interface.save()
 
-        packets = deque()
-        sleeptime = 0
-
-        pythos_thread = threading.Thread(target=RunCapture, args=(interface, duration, packets))
-        pythos_thread.start()
-
-        # For testing delete everything from previous captures
-        # Interface.objects.all().delete()
-       
-        lock = threading.Lock()
- 
-        try:
-                current_origin = Origin.objects.get ( uuid=origin_uuid )
-    
-        except:
-                print("Could not find specified origin: " + origin_uuid + " Aborting.")
-                return
-
-        while pythos_thread.is_alive() or packets:
-                if packets:
-                        sleeptime = 0
-
-                        if threading.active_count() < 10:
-                                # Get next packet from the queue (FIFO)
-                                newPacket = packets.popleft()
-
-                                threading.Thread(target=ProcessPacket,args=(newPacket,current_origin,lock)).start()
-        
-                        if len(packets) % 10 == 0:
-                                print(str(len(packets)) + " packets from live capture in queue. " + str(threading.active_count()) + " thread(s) active.")
-                else:
-                        pass
-#                        sleeptime += 1
-#                        time.sleep(sleeptime)
-
-def ProcessPacket(p,current_origin,lock):
+def process_packet(p,current_origin,lock):
 
         # see whether we like the package or not
         if not (p.haslayer(Ether) and p.haslayer(IP)):
@@ -156,7 +164,12 @@ def ProcessPacket(p,current_origin,lock):
         try:
             lock.acquire()
 
-            src_interface = Interface.objects.get ( address_ether=p[Ether].src, address_inet=p[IP].src, origin=current_origin, ttl_seen=p[IP].ttl )
+            src_interface = Interface.objects.get(
+                                address_ether=p[Ether].src,
+                                address_inet=p[IP].src,
+                                origin=current_origin,
+                                ttl_seen__in=[0, p[IP].ttl],
+                            )
 
             setattr(src_interface, 'tx_pkts', src_interface.tx_pkts + 1)
             setattr(src_interface, 'tx_bytes', src_interface.tx_bytes + p.len)
@@ -189,7 +202,11 @@ def ProcessPacket(p,current_origin,lock):
         try:
             lock.acquire()
 
-            dst_interface = Interface.objects.get ( address_ether=p[Ether].dst, address_inet=p[IP].dst, origin=current_origin, ttl_seen=p[IP].ttl )
+            dst_interface = Interface.objects.get(
+                                address_ether=p[Ether].dst,
+                                address_inet=p[IP].dst,
+                                origin=current_origin,
+                            )
 
             setattr(dst_interface, 'rx_pkts', dst_interface.rx_pkts + 1)
             setattr(dst_interface, 'rx_bytes', dst_interface.rx_bytes + p.len)
@@ -201,7 +218,6 @@ def ProcessPacket(p,current_origin,lock):
                                                           address_inet=p[IP].dst,
                                                           rx_pkts=1,
                                                           rx_bytes=p.len,
-                                                          ttl_seen=p[IP].ttl,
                                                           first_seen=timezone.now(),
                                                           last_seen=timezone.now(),
                                                           origin=current_origin )
@@ -356,6 +372,6 @@ def packet_chunk(chunk, current_origin):
         
         while chunk:
             next_packet = chunk.popleft()
-            ProcessPacket(next_packet, current_origin, lock)
+            process_packet(next_packet, current_origin, lock)
         
         print("Worker process with PID " + str(os.getpid()) + " has finished.")
