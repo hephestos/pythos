@@ -50,9 +50,9 @@ def PcapView(request):
             filepath = form.cleaned_data['filepath']
             description = form.cleaned_data['origin_description']
 
-            DiscoveryTask.delay(offline = True,
-                                filepath = filepath,
-                                origin_description = description)
+            DiscoveryTask(offline = True,
+                          filepath = filepath,
+                          origin_description = description)
 
             return render(request, 'discovery/pcap.html', {'form': form})
     else:

@@ -1,49 +1,40 @@
-from __future__ import absolute_import
 import time
-import threading
 from scapy.all import *
-from multiprocessing import Pool
-from collections import deque
 
-from celery import shared_task
 from django.utils import timezone
 from netaddr import IPNetwork
 from django.db import IntegrityError
 from django.db import connection as db_connection
 from django.db.models import Sum, Min, Max, Count
+from profilehooks import profile
 
 from .models import System, Interface, Net, Socket, Connection, DNScache
 from config.models import Origin
 from kb.models import OperatingSystem
 
-import yappi
+import logging
+import multiprocessing
 
-### fix to be able to spawn processes from a celery task
-from celery.signals import worker_process_init
-from multiprocessing import current_process
+import cProfile
 
-@worker_process_init.connect
-def fix_multiprocessing(**kwargs):
-    try:
-        current_process()._config
-    except AttributeError:
-        current_process()._config = {'semprefix': '/mp'}
+class PicklablePacket:
+    """A container for scapy packets that can be pickled (in contrast
+    to scapy packets themselves).
+    This works for python 3.5.1 and scapy 3.0.0 """
+    def __init__(self, pkt):
+        self.__contents = pkt.__bytes__()
+        self.__time = pkt.time
 
-### fix to allow pickling from within a subproces
-import dill
-
-def run_dill_encoded(what):
-    fun, args = dill.loads(what)
-    return fun(*args)
-
-def apply_async(pool, fun, args):
-    return pool.apply_async(run_dill_encoded, (dill.dumps((fun, args)),))
-
-###
+    def __call__(self):
+        """Get the original scapy packet."""
+        pkt = scapy.all.Ether(self.__contents)
+        pkt.time = self.__time
+        return pkt
 
 def add_packet(packets):
         def add_to_queue(pkt):
-            packets.append(pkt)
+            pick_packet = PicklablePacket(pkt)
+            packets.put(pick_packet)
 
         return add_to_queue
 
@@ -51,10 +42,9 @@ def run_capture(interface, duration, packets):
         sniff(iface=interface, timeout=float(duration), store=0, prn=add_packet(packets))
 
 def read_pcap(filepath, packets):
-        sniff(offline=filepath,count=100000, prn=add_packet(packets))
-#        sniff(offline=filepath, prn=add_packet(packets))
+#        sniff(offline=filepath,count=100000, prn=add_packet(packets))
+        sniff(offline=filepath, prn=add_packet(packets))
 
-@shared_task
 def DiscoveryTask(origin_uuid="",
                   offline=False,
                   interface="",
@@ -62,7 +52,18 @@ def DiscoveryTask(origin_uuid="",
                   filepath="",
                   origin_description=""):
 
-        packets = deque()
+        # Get an instance of a logger
+        logging.basicConfig(filename="/tmp/pythos_debug.log",level=logging.DEBUG)
+
+        m = multiprocessing.Manager()
+        packets = m.Queue()
+
+        multiprocessing.log_to_stderr(logging.INFO)
+
+        num_processes = os.cpu_count()
+        if not num_processes: num_processes = 2
+        
+        pool = multiprocessing.Pool(processes = num_processes)
 
         if offline: 
             current_origin = Origin.objects.create( name="PCAP " + filepath,
@@ -70,63 +71,53 @@ def DiscoveryTask(origin_uuid="",
                                                     sensor_flag=True,
                                                     plant_flag=False )
 
-            discovery_thread = threading.Thread(target=read_pcap, args=(filepath, packets))
-            print("Starting to read pcap file: " + filepath)
+            discovery_process = pool.apply_async(read_pcap, args=(filepath, packets))
+            logging.info("Starting to read pcap file: " + filepath)
+
         else:
             try:
                 current_origin = Origin.objects.get ( uuid=origin_uuid )
             except:
-                print("Could not find specified origin: " + origin_uuid + " Aborting.")
+                logging.error("Could not find specified origin: " + origin_uuid + " Aborting.")
                 return
 
-            discovery_thread = threading.Thread(target=run_capture, args=(interface, duration, packets))
-            print("Starting live capture on: " + interface)
+            discovery_process = pool.apply_async(run_capture, args=(interface, duration, packets))
+            logging.info("Starting live capture on: " + interface)
         
-        discovery_thread.start()
-
         # For testing delete everything from previous captures
         # Interface.objects.all().delete()
         
-        num_processes = os.cpu_count()
-        if not num_processes: num_processes = 2
-        
-        pool = Pool(processes = num_processes)
+        logging.info("Starting " + str(num_processes) + " worker processes.")
 
-        print("Starting " + str(num_processes) + " worker processes.")
-        while discovery_thread.is_alive() or packets:
-                num_packets = len(packets)
-                chunk_size = max(num_packets//num_processes, 1000)
+        time.sleep(5)
+ 
+        while not discovery_process.ready() or not packets.empty():
+            num_packets = packets.qsize()
+            chunk_size = max(num_packets//num_processes, 100000)
 
-                print(str(num_packets) + " packets in queue.")
+            if num_packets > chunk_size:
+                chunk = m.Queue()
+                for i in range(chunk_size):
+                    chunk.put(packets.get())
+                logging.debug("Processing chunk with size: " + str(chunk_size))
+                logging.debug(str(num_packets) + " packets in queue.")
+                pool.apply_async(packet_chunk, args=(chunk,current_origin,packets))
 
-                if num_packets >= chunk_size:
-                    # Get next packet chunk from the queue (FIFO)
-                    chunk = deque()
-                    for i in range(chunk_size):
-                        chunk.append(packets.popleft())
+            elif discovery_process.ready():
+                logging.debug("Processing last chunk.")
+                logging.debug(str(num_packets) + " packets in queue.")
+                pool.apply(packet_chunk, args=(packets,current_origin,packets))
 
-                    apply_async(pool, packet_chunk, args=(chunk,current_origin))
+            time.sleep(1)
 
-                elif not discovery_thread.is_alive():
-                    print("Processing last chunk.")
-                    chunk = deque()
-                    for i in range(num_packets):
-                        chunk.append(packets.popleft())
-
-                    apply_async(pool, packet_chunk, args=(chunk,current_origin))
-
-                time.sleep(1)
-
-        discovery_thread.join()
         pool.close()
         pool.join()
 
         if offline:
-            print("Pcap " + filepath + " has been processed successfully.")
+            logging.info("Pcap " + filepath + " has been processed successfully.")
         else:
-            print("Live capture on " + interface + " has been completed.")
+            logging.info("Live capture on " + interface + " has been completed.")
 
-@shared_task
 def find_gateways_task(threshold):
     gateways = Interface.objects.values(
                     'address_ether',
@@ -138,7 +129,6 @@ def find_gateways_task(threshold):
                     count_ips__gt = threshold,
                 )
 
-@shared_task
 def set_distances_task():
     for interface in Interface.objects.all():
         if interface.ttl_seen > 0:
@@ -154,7 +144,8 @@ def set_distances_task():
             interface.distance = -1
         interface.save()
 
-def process_packet(p,current_origin,lock):
+@profile
+def process_packet(p,current_origin):
 
         # see whether we like the package or not
         if not (p.haslayer(Ether) and p.haslayer(IP)):
@@ -162,8 +153,6 @@ def process_packet(p,current_origin,lock):
 
         # Save the source interface
         try:
-            lock.acquire()
-
             src_interface = Interface.objects.get(
                                 address_ether=p[Ether].src,
                                 address_inet=p[IP].src,
@@ -188,7 +177,6 @@ def process_packet(p,current_origin,lock):
         except AttributeError:
                 print('Raised AttributeError when reading source from package:')
                 print(p.summary)
-                lock.release()
                 return
 
         except IntegrityError:
@@ -196,12 +184,8 @@ def process_packet(p,current_origin,lock):
                 # we ignore attempts to create duplicate entries
                 pass
 
-        lock.release()
-
         # Save the destination interface
         try:
-            lock.acquire()
-
             dst_interface = Interface.objects.get(
                                 address_ether=p[Ether].dst,
                                 address_inet=p[IP].dst,
@@ -224,7 +208,6 @@ def process_packet(p,current_origin,lock):
         except AttributeError:
                 print('Raised AttributeError when reading destination from package:')
                 print(p.summary())
-                lock.release()
                 return
 
         except IntegrityError:
@@ -232,11 +215,8 @@ def process_packet(p,current_origin,lock):
                 # we ignore attempts to create duplicate entries
                 pass
 
-        lock.release()
-
         # Update the sockets
         try:
-                lock.acquire()
                 if p[Ether].type == 0x0800: # IPv4
                         src_socket, new_src_socket = Socket.objects.get_or_create( interface=src_interface,
                                                                                      port=p[IP].sport,
@@ -257,21 +237,17 @@ def process_packet(p,current_origin,lock):
 
                 else:
                         # If we don't understand the protocol skip to the next package
-                        lock.release()
                         return
 
         except AttributeError:
                 print('Raised AttributeError when reading ports from package:')
                 print(p.summary())
-                lock.release()
                 return
 
         except IntegrityError:
                 # Since get_or_create is not thread-safe,
                 # we ignore attempts to create duplicate entries
                 pass
-
-        lock.release()
 
         # Find DNS records
         if p[2].sport == 53:
@@ -323,8 +299,6 @@ def process_packet(p,current_origin,lock):
 
         # Update the connections
         try:
-                lock.acquire()
-
                 con = Connection.objects.get( src_socket=src_socket,
                                               dst_socket=dst_socket,
                                               protocol_l567=p.proto )
@@ -360,18 +334,13 @@ def process_packet(p,current_origin,lock):
 
         except Connection.MultipleObjectsReturned:
                 # This shouldn't happen, but in case it does we will skip to the next package
-                lock.release()
                 return
 
-        lock.release()
-
-def packet_chunk(chunk, current_origin):
-        lock = threading.Lock()
-
-        print("Worker process with PID " + str(os.getpid()) + " has started.")
-        
-        while chunk:
-            next_packet = chunk.popleft()
-            process_packet(next_packet, current_origin, lock)
-        
-        print("Worker process with PID " + str(os.getpid()) + " has finished.")
+def packet_chunk(chunk, current_origin, packets):
+        logging.info("Worker process with PID " + str(os.getpid()) + " has started.")
+       
+        while not chunk.empty():
+            next_packet = chunk.get_nowait()
+            process_packet(next_packet(), current_origin)
+       
+        logging.info("Worker process with PID " + str(os.getpid()) + " has finished.")
