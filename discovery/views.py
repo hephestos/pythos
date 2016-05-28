@@ -102,23 +102,3 @@ def ConversationsView(request):
     table = ConversationsTable(Connection.objects.all())
     RequestConfig(request).configure(table)
     return render(request, 'discovery/conversations.html', {'table': table})
-
-def demo_discretebarchart(request):
-    """
-    discretebarchart page
-    """
-    xdata = ["A", "B", "C", "D", "E", "F", "G"]
-    ydata = [3, 12, -10, 5, 35, -7, 2]
-
-    extra_serie1 = {"tooltip": {"y_start": "", "y_end": " cal"}}
-    chartdata = {
-        'x': xdata, 'name1': '', 'y1': ydata
-    }
-    charttype = "discreteBarChart"
-    chartcontainer = 'barchart_container'
-    data = {
-        'charttype': charttype,
-        'chartdata': chartdata,
-        'chartcontainer': chartcontainer,
-    }
-    return render(request, 'discovery/discretebarchart.html', data)

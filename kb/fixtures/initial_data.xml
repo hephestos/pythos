@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<django-objects version="1.0">
+        <object model="kb.operatingsystem">
+                <field name="vendor" type="CharField">misc.</field>
+                <field name="product" type="CharField">Linux (2.4 kernel)</field>
+                <field name="default_ttl" type="IntegerField">255</field>
+        </object>
+        <object model="kb.operatingsystem">
+                <field name="vendor" type="CharField">misc.</field>
+                <field name="product" type="CharField">BSD</field>
+                <field name="default_ttl" type="IntegerField">255</field>
+        </object>
+        <object model="kb.operatingsystem">
+                <field name="vendor" type="CharField">Microsoft</field>
+                <field name="product" type="CharField">Windows Server 2008</field>
+                <field name="default_ttl" type="IntegerField">128</field>
+        </object>
+        <object model="kb.operatingsystem">
+                <field name="vendor" type="CharField">Microsoft</field>
+                <field name="product" type="CharField">Windows 7</field>
+                <field name="default_ttl" type="IntegerField">128</field>
+        </object>
+        <object model="kb.operatingsystem">
+                <field name="vendor" type="CharField">Microsoft</field>
+                <field name="product" type="CharField">Windows XP</field>
+                <field name="default_ttl" type="IntegerField">128</field>
+        </object>
+        <object model="kb.operatingsystem">
+                <field name="vendor" type="CharField">RedHat</field>
+                <field name="product" type="CharField">Linux 9</field>
+                <field name="default_ttl" type="IntegerField">64</field>
+        </object>
+        <object model="kb.operatingsystem">
+                <field name="vendor" type="CharField">misc.</field>
+                <field name="product" type="CharField">FreeBSD</field>
+                <field name="default_ttl" type="IntegerField">64</field>
+        </object>
+        <object model="kb.operatingsystem">
+                <field name="vendor" type="CharField">Apple</field>
+                <field name="product" type="CharField">MacOS X</field>
+                <field name="default_ttl" type="IntegerField">64</field>
+        </object>
+        <object model="kb.operatingsystem">
+                <field name="vendor" type="CharField">IBM</field>
+                <field name="product" type="CharField">AIX</field>
+                <field name="default_ttl" type="IntegerField">60</field>
+        </object>
+</django-objects>
