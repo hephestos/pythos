@@ -14,7 +14,7 @@ import time, datetime, random
 
 from .models import Interface, Connection
 from .forms import ControlForm, PcapForm
-from .tasks import DiscoveryTask
+from .tasks import discovery_task
 
 from discovery.tables import ConversationsTable
 
@@ -32,7 +32,7 @@ def ControlView(request):
             capture_interface = form.cleaned_data['interface']
             capture_duration = form.cleaned_data['duration']
 
-            DiscoveryTask.delay(origin_uuid="d44d8aa8c5ef495f992d7531336784fe",
+            discovery_task.delay(origin_uuid="d44d8aa8c5ef495f992d7531336784fe",
                                 offline=False,
                                 interface=capture_interface,
                                 duration=capture_duration)
@@ -50,7 +50,7 @@ def PcapView(request):
             filepath = form.cleaned_data['filepath']
             description = form.cleaned_data['origin_description']
 
-            DiscoveryTask(offline = True,
+            discovery_task(offline = True,
                           filepath = filepath,
                           origin_description = description)
 
