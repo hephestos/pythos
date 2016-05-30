@@ -1,5 +1,5 @@
 from django import forms
-
+from django.conf import settings
 import netifaces
 
 class ControlForm(forms.Form):
@@ -32,7 +32,7 @@ class PcapForm(forms.Form):
         def __init__(self, *args, **kwargs):
                 super(PcapForm, self).__init__(*args, **kwargs)
                 self.fields['filepath'] = forms.FilePathField(label='Select pcap file',
-                                                              path='/home/scout/ICSsec/sites',
+                                                              path=settings.pcap_folder,
                                                               recursive=True,
                                                               match="\.pcap$",
                                                               allow_files=True,

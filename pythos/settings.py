@@ -15,6 +15,9 @@ import os
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Basic configuration settings
+pcap_folder = '/home/scout/ICSsec/sites'
+
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/1.8/howto/deployment/checklist/
@@ -31,27 +34,31 @@ ALLOWED_HOSTS = ['localhost']
 # Application definition
 
 INSTALLED_APPS = (
+    # Default
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'djangobower',
-    'django_tables2',
+    # Custom
+    'djangobower',		# Bower is a package manager for the web (e.g. include js libs like jquery or underscore)
+    'django_tables2',		# An app for creating HTML tables
 #    'django_otp',
 #    'django_otp.plugins.otp_static',
 #    'django_otp.plugins.otp_totp',
 #    'two_factor',
 #    'otp_yubikey',
-    'djcelery',
-    'kombu.transport.django',
-    'django_nvd3',
-    'kb',
-    'discovery',
-    'config',
+    'djcelery',			# Celery is a task queue/job queue based on distributed message passing
+    'kombu.transport.django',	# Dependency of Celery
+    'django_nvd3',		# Django Wrapper for NVD3 - It's time for beautiful charts
+    # Apps coming with pythos
+    'kb',			# System identification (e.g. OS)
+    'discovery',		# Capturing network traffic, parse and store relevant data to database
+    'config',			# Global configuration (e.g. sites overview, network interfaces)
 )
 
+# See djangobower in INSTALLED_APPS
 BOWER_INSTALLED_APPS = (
     'jquery#1.9',
     'underscore',
