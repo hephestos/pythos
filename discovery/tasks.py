@@ -45,7 +45,7 @@ def read_pcap(filepath, packets):
 #        sniff(offline=filepath,count=100000, prn=add_packet(packets))
         sniff(offline=filepath, prn=add_packet(packets))
 
-def DiscoveryTask(origin_uuid="",
+def discovery_task(origin_uuid="",
                   offline=False,
                   interface="",
                   duration=0,
@@ -63,7 +63,7 @@ def DiscoveryTask(origin_uuid="",
         num_processes = os.cpu_count()
         if not num_processes: num_processes = 2
         
-        pool = multiprocessing.Pool(processes = num_processes)
+        pool = multiprocessing.Pool(processes = num_processes, maxtasksperchild=1)
 
         if offline: 
             current_origin = Origin.objects.create( name="PCAP " + filepath,
@@ -71,7 +71,7 @@ def DiscoveryTask(origin_uuid="",
                                                     sensor_flag=True,
                                                     plant_flag=False )
 
-            discovery_process = pool.apply_async(read_pcap, args=(filepath, packets))
+            discovery_process = multiprocessing.Process(target=read_pcap, args=(filepath, packets))
             logging.info("Starting to read pcap file: " + filepath)
 
         else:
@@ -81,34 +81,34 @@ def DiscoveryTask(origin_uuid="",
                 logging.error("Could not find specified origin: " + origin_uuid + " Aborting.")
                 return
 
-            discovery_process = pool.apply_async(run_capture, args=(interface, duration, packets))
+            discovery_process = multiprocessing.Process(target=run_capture, args=(interface, duration, packets))
             logging.info("Starting live capture on: " + interface)
         
+        discovery_process.start()
+
         # For testing delete everything from previous captures
         # Interface.objects.all().delete()
         
         logging.info("Starting " + str(num_processes) + " worker processes.")
 
-        time.sleep(5)
- 
-        while not discovery_process.ready() or not packets.empty():
+        while discovery_process.is_alive() or not packets.empty():
             num_packets = packets.qsize()
-            chunk_size = max(num_packets//num_processes, 100000)
+            chunk_size = max(num_packets//num_processes, 10000)
+
+            logging.debug(str(num_packets) + " packets in queue.")
 
             if num_packets > chunk_size:
                 chunk = m.Queue()
                 for i in range(chunk_size):
                     chunk.put(packets.get())
                 logging.debug("Processing chunk with size: " + str(chunk_size))
-                logging.debug(str(num_packets) + " packets in queue.")
                 pool.apply_async(packet_chunk, args=(chunk,current_origin,packets))
 
-            elif discovery_process.ready():
+            elif not discovery_process.is_alive():
                 logging.debug("Processing last chunk.")
-                logging.debug(str(num_packets) + " packets in queue.")
                 pool.apply(packet_chunk, args=(packets,current_origin,packets))
 
-            time.sleep(1)
+            time.sleep(10)
 
         pool.close()
         pool.join()
@@ -118,7 +118,7 @@ def DiscoveryTask(origin_uuid="",
         else:
             logging.info("Live capture on " + interface + " has been completed.")
 
-def find_gateways_task(threshold):
+def guess_gateways_by_connections(threshold):
     gateways = Interface.objects.values(
                     'address_ether',
                 ).annotate(
@@ -129,20 +129,94 @@ def find_gateways_task(threshold):
                     count_ips__gt = threshold,
                 )
 
-def set_distances_task():
+def guess_distances_by_ttl():
     for interface in Interface.objects.all():
         if interface.ttl_seen > 0:
             default_ttl = OperatingSystem.objects.filter(
-                                default_ttl__gte = interface.ttl_seen
+                                default_ttl__gte = interface.ttl_seen,
                             ).order_by(
-                                'default_ttl'
+                                'default_ttl',
                             ).values(
-                                'default_ttl'
+                                'default_ttl',
                             ).first()['default_ttl']
             interface.distance = default_ttl - interface.ttl_seen
         else:
             interface.distance = -1
         interface.save()
+
+def guess_networks_by_broadcasts():
+    # get known networks
+    known_netaddresses = []
+
+    networks = Net.objects.order_by(
+                    'address_inet',
+                    'origin__plant_flag',
+                )
+
+    for net in networks:
+        if not net.address_inet in known_netaddresses:
+            known_netaddresses.append(net.address_inet)
+
+    # find broadcast addresses
+    broadcasts = Interface.objects.values(
+                        'address_ether',
+                        'address_inet',
+                    ).filter(
+                        address_ether = "FF:FF:FF:FF:FF:FF",
+                        net__isnull = True,
+                    ).order_by(
+                        'address_inet',
+                    ).distinct()
+
+    for bcast in broadcasts:
+        # find the IP addresses that have sent packets to this broadcast address
+        source = Interface.objects.filter(
+                       address_inet = bcast['address_inet'],
+                    ).exclude(
+                        sockets__dst_connections__src_socket__interface__address_inet = "0.0.0.0",
+                    ).values_list(
+                        'sockets__dst_connections__src_socket__interface__address_inet',
+                    ).order_by(
+                        'sockets__dst_connections__src_socket__interface__address_inet',
+                    ).first()
+
+        if source:
+            OCTET_SEPARATOR = "."
+
+            source_octets  = source[0].split(OCTET_SEPARATOR)
+            bcast_octets   = bcast['address_inet'].split(OCTET_SEPARATOR)
+            netmask_octets = ["0","0","0","0"]
+            netaddr_octets = ["0","0","0","0"]
+
+            # The part of the source IP address that matches the broadcast address
+            # is assumed to be the network address
+            for i_octet in range(len(source_octets)):
+                if source_octets[i_octet] == bcast_octets[i_octet]:
+                    netmask_octets[i_octet] = "255"
+                    netaddr_octets[i_octet] = source_octets[i_octet]
+                else:
+                    # now things become complicated...
+                    # + source_octets holds the lowest known IP address within the broadcast domain
+                    # + We try to claim the largest available network
+
+                    for i_mask in range(8, 0, -1):
+                        netmask_octets[i_octet] = str((256 - (2 ** (int(bcast_octets[i_octet]) - 1).bit_length())) & 0xFF)
+                        netaddr_octets[i_octet] = str(int(source_octets[i_octet]) & int(netmask_octets[i_octet]))
+
+                        new_netaddr = OCTET_SEPARATOR.join(netaddr_octets)
+                        new_netmask = OCTET_SEPARATOR.join(netmask_octets)
+                        new_bcast   = OCTET_SEPARATOR.join(bcast_octets)
+
+                        if not new_netaddr in known_netaddresses:
+                            known_netaddresses.append(new_netaddr)
+
+                            new_net = Net.objects.create( address_inet  = new_netaddr,
+                                                          mask_inet     = new_netmask,
+                                                          address_bcast = new_bcast,
+                                                        )
+
+                            break
+                    break
 
 @profile
 def process_packet(p,current_origin):
@@ -166,14 +240,14 @@ def process_packet(p,current_origin):
             src_interface.save()
 
         except Interface.DoesNotExist:
-                src_interface = Interface.objects.create( address_ether=p[Ether].src,
-                                                          address_inet=p[IP].src,
-                                                          tx_pkts=1,
-                                                          tx_bytes=p.len,
-                                                          ttl_seen=p[IP].ttl,
-                                                          first_seen=timezone.now(),
-                                                          last_seen=timezone.now(),
-                                                          origin=current_origin )
+                src_interface = Interface.objects.create( address_ether = p[Ether].src,
+                                                          address_inet  = p[IP].src,
+                                                          tx_pkts       = 1,
+                                                          tx_bytes      = p.len,
+                                                          ttl_seen      = p[IP].ttl,
+                                                          first_seen    = timezone.now(),
+                                                          origin        = current_origin,
+                                                        )
         except AttributeError:
                 print('Raised AttributeError when reading source from package:')
                 print(p.summary)
@@ -198,13 +272,13 @@ def process_packet(p,current_origin):
             dst_interface.save()
 
         except Interface.DoesNotExist:
-                dst_interface = Interface.objects.create( address_ether=p[Ether].dst,
-                                                          address_inet=p[IP].dst,
-                                                          rx_pkts=1,
-                                                          rx_bytes=p.len,
-                                                          first_seen=timezone.now(),
-                                                          last_seen=timezone.now(),
-                                                          origin=current_origin )
+                dst_interface = Interface.objects.create( address_ether = p[Ether].dst,
+                                                          address_inet  = p[IP].dst,
+                                                          rx_pkts       = 1,
+                                                          rx_bytes      = p.len,
+                                                          first_seen    = timezone.now(),
+                                                          origin        = current_origin,
+                                                        )
         except AttributeError:
                 print('Raised AttributeError when reading destination from package:')
                 print(p.summary())
