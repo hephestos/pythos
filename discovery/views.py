@@ -14,25 +14,28 @@ import time, datetime, random
 
 from .models import Interface, Connection
 from .forms import ControlForm, PcapForm
-from .tasks import discovery_task
+from .tasks import DiscoveryTask
 
 from discovery.tables import ConversationsTable
 
+# Overview of identified systems
 class IndexView(generic.ListView):
     template_name = 'discovery/index.html'
+    # Interface in terms of an interface belonging to an identified system (NOT the interface used for capturing traffic)
     context_object_name = 'interface_list'
 
     def get_queryset(self):
         return Interface.objects.order_by('address_inet')
 
+# Discovery control interface (trigger to capture traffic on specific interfaces)
 def ControlView(request):
     if request.method == 'POST':
         form = ControlForm(request.POST)
         if form.is_valid():
             capture_interface = form.cleaned_data['interface']
             capture_duration = form.cleaned_data['duration']
-
-            discovery_task.delay(origin_uuid="d44d8aa8c5ef495f992d7531336784fe",
+            # Start Celery task
+            DiscoveryTask.delay(origin_uuid="d44d8aa8c5ef495f992d7531336784fe",
                                 offline=False,
                                 interface=capture_interface,
                                 duration=capture_duration)
@@ -43,14 +46,15 @@ def ControlView(request):
 
     return render(request, 'discovery/control.html', {'form': form})
 
+# Process PCAP files from predefined folder for analysis
 def PcapView(request):
     if request.method == 'POST':
         form = PcapForm(request.POST)
         if form.is_valid():
             filepath = form.cleaned_data['filepath']
             description = form.cleaned_data['origin_description']
-
-            discovery_task(offline = True,
+            # Start Celery task
+            DiscoveryTask(offline = True,
                           filepath = filepath,
                           origin_description = description)
 
@@ -60,6 +64,7 @@ def PcapView(request):
 
     return render(request, 'discovery/pcap.html', {'form': form})
 
+# Overview of identified systems as table (same as IndexView) - but something is happening here with charts in near future ...
 def EndpointsView(request):
     interface_objects = Interface.objects.values(
                             'address_inet',
@@ -98,6 +103,7 @@ def EndpointsView(request):
              }
          )
 
+# Overview of identified conversations (per ip addresses and used ports in both directions)
 def ConversationsView(request):
     table = ConversationsTable(Connection.objects.all())
     RequestConfig(request).configure(table)

@@ -17,3 +17,7 @@ Pythos is analyzing the network traffic to identify
 - [...]
 
 The aggregated information results in network diagrams for a network architecture overview.
+
+## Usage
+Celery has to be started with the following command line from the pythos project folder:
+C_FORCE_ROOT=true celery -A pythos worker -l info -c 5

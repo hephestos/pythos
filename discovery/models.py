@@ -2,7 +2,6 @@ from django.db import models
 from macaddress.fields import MACAddressField
 
 class Net(models.Model):
-        origin        = models.ForeignKey('config.Origin', null=True, blank=True)
         site          = models.ForeignKey('config.Site', null=True, blank=True)
         address_inet  = models.GenericIPAddressField(db_index=True, null=True, blank=True)
         mask_inet     = models.GenericIPAddressField(db_index=True, null=True, blank=True)
@@ -16,6 +15,7 @@ class System(models.Model):
         description   = models.TextField()
         os            = models.ForeignKey('kb.OperatingSystem', null=True, blank=True)
 
+# Interface as an interface belonging to an identified system (NOT the interface used for capturing traffic)
 class Interface(models.Model):
         origin        = models.ForeignKey('config.Origin', null=True, blank=True)
         system        = models.ForeignKey('System', null=True, blank=True)
