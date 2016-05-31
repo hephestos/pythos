@@ -1,6 +1,8 @@
 import django_tables2 as tables
 from discovery.models import Interface, Socket, Connection
 
+# These classes are used in views.py
+
 class ConversationsTable(tables.Table):
         src_port = tables.Column(accessor='src_socket.port')
         src_addr = tables.Column(accessor='src_socket.interface.address_ether')

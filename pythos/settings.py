@@ -15,6 +15,8 @@ import os
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Basic configuration settings
+PCAP_FOLDER = '/home/scout/ICSsec/sites'
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/1.8/howto/deployment/checklist/
@@ -31,12 +33,14 @@ ALLOWED_HOSTS = ['localhost']
 # Application definition
 
 INSTALLED_APPS = (
+    # default
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    # custom
     'djangobower',
     'django_tables2',
 #    'django_otp',
@@ -44,14 +48,13 @@ INSTALLED_APPS = (
 #    'django_otp.plugins.otp_totp',
 #    'two_factor',
 #    'otp_yubikey',
-    'djcelery',
-    'kombu.transport.django',
-    'django_nvd3',
-    'kb',
-    'discovery',
-    'config',
+    'django_nvd3',  # Django Wrapper for NVD3 - It's time for beautiful charts
+    'kb',           # System identification (e.g. OS)
+    'discovery',    # Capturing network traffic, parse and store relevant data to database
+    'config',       # Global configuration (e.g. sites overview, network interfaces)
 )
 
+# See djangobower in INSTALLED_APPS
 BOWER_INSTALLED_APPS = (
     'jquery#1.9',
     'underscore',
@@ -151,14 +154,3 @@ SECURE_HSTS_INCLUDE_SUBDOMAINS = False # True
 #from django.core.urlresolvers import reverse_lazy
 
 #LOGIN_URL = reverse_lazy('two_factor:login')
-
-
-# Celery
-
-BROKER_URL = 'django://'
-CELERY_RESULT_BACKEND='djcelery.backends.database:DatabaseBackend'
-
-# fluent dashboard
-ADMIN_TOOLS_INDEX_DASHBOARD = 'fluent_dashboard.dashboard.FluentIndexDashboard'
-ADMIN_TOOLS_APP_INDEX_DASHBOARD = 'fluent_dashboard.dashboard.FluentAppIndexDashboard'
-ADMIN_TOOLS_MENU = 'fluent_dashboard.menu.FluentMenu'

@@ -18,6 +18,7 @@ from .tasks import discovery_task
 
 from discovery.tables import ConversationsTable
 
+# Overview of identified systems
 class IndexView(generic.ListView):
     template_name = 'discovery/index.html'
     context_object_name = 'interface_list'
@@ -25,6 +26,7 @@ class IndexView(generic.ListView):
     def get_queryset(self):
         return Interface.objects.order_by('address_inet')
 
+# Discovery control interface (trigger to capture traffic on specific interfaces)
 def ControlView(request):
     if request.method == 'POST':
         form = ControlForm(request.POST)
@@ -43,6 +45,7 @@ def ControlView(request):
 
     return render(request, 'discovery/control.html', {'form': form})
 
+# Process PCAP files from predefined folder for analysis
 def PcapView(request):
     if request.method == 'POST':
         form = PcapForm(request.POST)
@@ -60,6 +63,8 @@ def PcapView(request):
 
     return render(request, 'discovery/pcap.html', {'form': form})
 
+# Overview of identified systems as table (same as IndexView)
+# Something will happen here with charts in near future
 def EndpointsView(request):
     interface_objects = Interface.objects.values(
                             'address_inet',
@@ -98,6 +103,8 @@ def EndpointsView(request):
              }
          )
 
+# Overview of identified conversations
+# Per IP address and used ports in both directions
 def ConversationsView(request):
     table = ConversationsTable(Connection.objects.all())
     RequestConfig(request).configure(table)
