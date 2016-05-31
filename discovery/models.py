@@ -22,9 +22,7 @@ class Interface(models.Model):
         origin        = models.ForeignKey('config.Origin', null=True, blank=True)
         system        = models.ForeignKey('System', null=True, blank=True)
         net           = models.ForeignKey('Net', null=True, blank=True)
-:c
-:x
-:x
+        address_ether = MACAddressField(integer=False, null=True, blank=True)
         address_inet  = models.GenericIPAddressField(null=True, blank=True)
         distance      = models.IntegerField(default=-1)
         protocol_l3   = models.IntegerField(default=0)
