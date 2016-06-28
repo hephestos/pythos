@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+        <django-objects version="1.0">
+        <object model="architecture.Partition">
+                <field name="layer" type="IntegerField">0</field>
+                <field name="name" type="CharField">Shopfloor</field>
+        </object>
+        <object model="architecture.Partition">
+                <field name="layer" type="IntegerField">1</field>
+                <field name="name" type="CharField">MES</field>
+        </object>
+        <object model="architecture.Partition">
+                <field name="layer" type="IntegerField">2</field>
+                <field name="name" type="CharField">DCS</field>
+        </object>
+        <object model="architecture.Partition">
+                <field name="layer" type="IntegerField">3</field>
+                <field name="name" type="CharField">Controller</field>
+        </object>
+        <object model="architecture.Partition">
+                <field name="layer" type="IntegerField">4</field>
+                <field name="name" type="CharField">Field</field>
+        </object>
+</django-objects>
