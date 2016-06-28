@@ -9,7 +9,7 @@ from django.db import IntegrityError
 
 # import third party modules
 from netaddr import IPNetwork
-from scapy import sniff, Ether
+from scapy.all import sniff, Ether
 from profilehooks import profile
 
 # import project specific model classes
@@ -151,13 +151,13 @@ class PicklablePacket:
     to scapy packets themselves).
     This works for python 3.5.1 and scapy 3.0.0 """
     def __init__(self, pkt):
-        self.____contents = pkt.__bytes__()
-        self.____time = pkt.time
+        self.__contents = pkt.__bytes__()
+        self.__time = pkt.time
 
     def __call__(self):
         """Get the original scapy packet."""
-        pkt = Ether(self.____contents)
-        pkt.time = self.____time
+        pkt = Ether(self.__contents)
+        pkt.time = self.__time
         return pkt
 
 
@@ -190,14 +190,34 @@ def process_packet(p, current_origin):
     if not (p.haslayer('Ether') and p.haslayer('IP')):
         return
 
+    src_interface, dst_interface = \
+        packet_get_interfaces(p)
+    if src_interface and dst_interface:
+        src_socket, dst_socket = \
+            packet_get_sockets(p, src_interface, dst_interface)
+        if src_socket and dst_socket:
+            packet_find_connections(p, src_socket, dst_socket)
+            if p.haslayer['IP']:
+                packet_find_dns_records(p)
+                packet_find_dhcp_acks(p)
+
+
+def packet_get_interfaces(p):
     # Save the source interface
     try:
-        src_interface = Interface.objects.get(
-                            address_ether=p['Ether'].src,
-                            address_inet=p['IP'].src,
-                            origin=current_origin,
-                            ttl_seen__in=[0, p['IP'].ttl],
-                        )
+        if p.haslayer('IP'):
+            src_interface = Interface.objects.get(
+                                address_ether=p['Ether'].src,
+                                address_inet=p['IP'].src,
+                                origin=current_origin,
+                                ttl_seen__in=[0, p['IP'].ttl],
+                            )
+        else:
+            src_interface = Interface.objects.get(
+                                address_ether=p['Ether'].src,
+                                address_inet__isnull=True,
+                                origin=current_origin,
+                            )
 
         setattr(src_interface, 'tx_pkts', src_interface.tx_pkts + 1)
         setattr(src_interface, 'tx_bytes', src_interface.tx_bytes + p.len)
@@ -205,18 +225,29 @@ def process_packet(p, current_origin):
         src_interface.save()
 
     except Interface.DoesNotExist:
-        src_interface = Interface.objects.create(address_ether=p['Ether'].src,
-                                                 address_inet=p['IP'].src,
-                                                 tx_pkts=1,
-                                                 tx_bytes=p.len,
-                                                 ttl_seen=p['IP'].ttl,
-                                                 first_seen=timezone.now(),
-                                                 origin=current_origin,
-                                                 )
+        if p.haslayer('IP'):
+            src_interface = Interface.objects.create(
+                                address_ether=p['Ether'].src,
+                                address_inet=p['IP'].src,
+                                tx_pkts=1,
+                                tx_bytes=p.len,
+                                ttl_seen=p['IP'].ttl,
+                                first_seen=timezone.now(),
+                                origin=current_origin,
+                            )
+        else:
+            src_interface = Interface.objects.create(
+                                address_ether=p['Ether'].src,
+                                tx_pkts=1,
+                                tx_bytes=p.len,
+                                first_seen=timezone.now(),
+                                origin=current_origin,
+                            )
+
     except AttributeError:
         print('Raised AttributeError when reading source from package:')
         print(p.summary)
-        return
+        return (False, False)
 
     except IntegrityError:
         # Since we are not thread-safe,
@@ -225,11 +256,17 @@ def process_packet(p, current_origin):
 
     # Save the destination interface
     try:
-        dst_interface = Interface.objects.get(
-                            address_ether=p['Ether'].dst,
-                            address_inet=p['IP'].dst,
-                            origin=current_origin,
-                        )
+        if p.haslayer('IP'):
+            dst_interface = Interface.objects.get(
+                                address_ether=p['Ether'].dst,
+                                address_inet=p['IP'].dst,
+                                origin=current_origin,
+                            )
+        else:
+            dst_interface = Interface.objects.get(
+                                address_ether=p['Ether'].dst,
+                                origin=current_origin,
+                            )
 
         setattr(dst_interface, 'rx_pkts', dst_interface.rx_pkts + 1)
         setattr(dst_interface, 'rx_bytes', dst_interface.rx_bytes + p.len)
@@ -237,23 +274,38 @@ def process_packet(p, current_origin):
         dst_interface.save()
 
     except Interface.DoesNotExist:
-        dst_interface = Interface.objects.create(address_ether=p['Ether'].dst,
-                                                 address_inet=p['IP'].dst,
-                                                 rx_pkts=1,
-                                                 rx_bytes=p.len,
-                                                 first_seen=timezone.now(),
-                                                 origin=current_origin,
-                                                 )
+        if p.haslayer('IP'):
+            dst_interface = Interface.objects.create(
+                                address_ether=p['Ether'].dst,
+                                address_inet=p['IP'].dst,
+                                rx_pkts=1,
+                                rx_bytes=p.len,
+                                first_seen=timezone.now(),
+                                origin=current_origin,
+                            )
+        else:
+            dst_interface = Interface.objects.create(
+                                address_ether=p['Ether'].dst,
+                                rx_pkts=1,
+                                rx_bytes=p.len,
+                                first_seen=timezone.now(),
+                                origin=current_origin,
+                            )
+
     except AttributeError:
         print('Raised AttributeError when reading destination from package:')
         print(p.summary())
-        return
+        return (False, False)
 
     except IntegrityError:
         # Since we are not thread-safe,
         # we ignore attempts to create duplicate entries
         pass
 
+    return (src_interface, dst_interface)
+
+
+def packet_get_sockets(p, src_interface, dst_interface):
     # Update the sockets
     try:
         if p['Ether'].type == 0x0800:
@@ -268,7 +320,7 @@ def process_packet(p, current_origin):
                                             interface=dst_interface,
                                             port=p['IP'].dport,
                                             protocol_l4=p['IP'].proto
-                                                                      )
+                                            )
 
         elif p['Ether'].type == 0x86DD:
             # IPv6
@@ -285,65 +337,47 @@ def process_packet(p, current_origin):
                                             )
         else:
             # If we don't understand the protocol skip to the next package
-            return
+            return (False, False)
 
     except AttributeError:
         print('Raised AttributeError when reading ports from package:')
         print(p.summary())
-        return
+        return (False, False)
 
     except IntegrityError:
         # Since get_or_create is not thread-safe,
         # we ignore attempts to create duplicate entries
         pass
 
-    # Find DNS records
-    if p['IP'].sport == 53:
-        try:
-            updated_values_dnscache = {"name": p[6].rrname,
-                                       "last_seen": timezone.now()
-                                       }
+    return (src_socket, dst_socket)
 
-            DNScache.objects.update_or_create(address_inet=p[6].rdata,
-                                              defaults=updated_values_dnscache
-                                              )
-        except AttributeError:
-            print('Raised AttributeError when reading DNS answer '
-                  'from package:')
-            print(p.summary())
 
-        except TypeError:
-            print('Raised TypeError when reading DNS answer from package:')
-            print(p.summary())
-
-        except IndexError:
-            # This was not a DNSRR. Disregard.
-            pass
-
+def packet_find_dhcp_acks(p):
     # Find DHCP ACKs
-    if p['IP'].sport == 67:
+    if p.sport == 67:
         try:
-            # FIXME find names for numeric indices
-            if p[4].options[0][1] == 5:
+            dhcp_opts = scapy_get_packet_options(p['DHCP'].options)
+
+            if dhcp_opts['message-type'] == 5:
                 # DHCP ACK
                 ip_network = IPNetwork(p['IP'].dst)
                 ip_network.prefixlen = sum([bin(int(x)).count('1') for x in
-                                            p[4].options[5][1].split('.')]
+                                            dhcp_opts['subnet_mask'].split('.')]
                                            )
 
                 gateway, new_gateway = \
                     Interface.objects.get_or_create(
-                        address_inet=p[4].options[7][1],
+                        address_inet=dhcp_opts['router'],
                         net=Net.objects.all()[0]
                         )
 
                 name_server, new_name_server = \
                     Interface.objects.get_or_create(
-                        address_inet=p[4].options[8][1],
+                        address_inet=dhcp_opts['name_server'],
                         net=Net.objects.all()[0]
                         )
 
-                updated_values_net = {'mask_inet': p[4].options[5][1],
+                updated_values_net = {'mask_inet': dhcp_opts['subnet_mask'],
                                       'address_bcast': p[4].options[6][1],
                                       'gateway': gateway,
                                       'name_server': name_server
@@ -351,12 +385,14 @@ def process_packet(p, current_origin):
 
                 our_net, new_net = Net.objects.update_or_create(
                                     address_inet=str(ip_network.network),
-                                    defaults=updated_values_net,
+                                    defaults=updated_values_net, 
                                     )
         except AttributeError:
             print('Raised AttributeError when reading DHCP ACK from package:')
             print(p.show())
 
+
+def packet_find_connections(p, src_socket, dst_socket):
     # Update the connections
     try:
         con = Connection.objects.get(src_socket=src_socket,
@@ -395,3 +431,38 @@ def process_packet(p, current_origin):
         # This shouldn't happen, but in case it does we will
         # skip to the next package
         return
+
+
+def packet_find_dns_records(p):
+    # Find DNS records
+    if p.sport == 53:
+        try:
+            updated_values_dnscache = {"name": p[6].rrname,
+                                       "last_seen": timezone.now()
+                                       }
+
+            DNScache.objects.update_or_create(address_inet=p[6].rdata,
+                                              defaults=updated_values_dnscache
+                                              )
+        except AttributeError:
+            print('Raised AttributeError when reading DNS answer '
+                  'from package:')
+            print(p.summary())
+
+        except TypeError:
+            print('Raised TypeError when reading DNS answer from package:')
+            print(p.summary())
+
+        except IndexError:
+            # This was not a DNSRR. Disregard.
+            pass
+
+
+def scapy_get_packet_options(options):
+    if not type(options) is list:
+        return False
+    optdict = {}
+    for optlist in options:
+        if type(optlist) is tuple and len(optlist) > 1:
+            optdict[optlist[0]] = list(set(optlist[1:]))[0]
+    return optdict

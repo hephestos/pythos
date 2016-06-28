@@ -17,7 +17,7 @@ class System(models.Model):
         os            = models.ForeignKey('kb.OperatingSystem', null=True, blank=True)
 
 # Interface as an interface belonging to an identified system.
-# NOT the interface user for capturing traffic!
+# NOT the interface used for capturing traffic!
 class Interface(models.Model):
         origin        = models.ForeignKey('config.Origin', null=True, blank=True)
         system        = models.ForeignKey('System', null=True, blank=True)
