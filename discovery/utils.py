@@ -4,7 +4,7 @@ import os
 
 # import django modules
 from django.utils import timezone
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.db import IntegrityError
 
 # import third party modules
@@ -148,8 +148,9 @@ def identify_systems():
     for interface in unassigned_macs:
         ether_number = int(interface['address_ether'].replace(BYTE_SEPARATOR, ''), 16)
 
-        if interface['address_ether'] == "FF:FF:FF:FF:FF:FF" or
-           LOW_MULTICAST <= ether_number <= HIGH_MULTICAST
+        if interface['address_ether'] == "FF:FF:FF:FF:FF:FF" or (
+            LOW_MULTICAST <= ether_number <= HIGH_MULTICAST
+        ):
             continue
 
         mac_group = Interface.objects.values(
@@ -162,7 +163,7 @@ def identify_systems():
         new_system = System.objects.create()
         mac_group.update(system=new_system)
 
-    #TODO identify systems with adjacent mac addresses
+    # TODO identify systems with adjacent mac addresses
 
 
 def packet_chunk(chunk, current_origin, packets):
@@ -218,9 +219,9 @@ def read_pcap(filepath, packets):
 
 @profile
 def process_packet(p, current_origin):
-
-    # see whether we like the package or not
-    if not (p.haslayer('Ether') and p.haslayer('IP')):
+    if not p.haslayer('Ether'):
+        # TODO consider packets without Ethernet layer
+        #      (e.g. traffic captured from within a tunnel)
         return
 
     src_interface, dst_interface = \
@@ -428,26 +429,56 @@ def packet_find_dhcp_acks(p):
 def packet_find_connections(p, src_socket, dst_socket):
     # Update the connections
     try:
-        con = Connection.objects.get(src_socket=src_socket,
-                                     dst_socket=dst_socket,
-                                     protocol_l567=p.proto,
-                                     )
+        con = Connection.objects.get(
+                Q(src_socket=src_socket) | Q(src_socket=dst_socket),
+                Q(dst_socket=dst_socket) | Q(dst_socket=src_socket),
+                protocol_l567=p.proto,
+                closed_flag=False,
+                )
+
+        setattr(con, 'tx_pkts', con.tx_pkts + 1)
+        setattr(con, 'tx_bytes', con.tx_bytes + p.len)
+
         if p.proto == 6:
             # This is a TCP connection
             setattr(con, 'seq', p.seq)
-            setattr(con, 'tx_pkts', con.tx_pkts + 1)
-            setattr(con, 'tx_bytes', con.tx_bytes + p.len)
+            if p['TCP'].flags & 0x2:
+                setattr(con, 'syn_flag', True)
+            if p['TCP'].flags & 0x5:
+                setattr(con, 'closed_flag', True)
 
-            con.save()
+        con.save()
 
     except Connection.DoesNotExist:
         if p.proto == 6:
-            con = Connection.objects.create(src_socket=src_socket,
-                                            dst_socket=dst_socket,
-                                            protocol_l567=p.proto,
-                                            first_seen=timezone.now(),
-                                            seq=p.seq,
-                                            )
+            if p['TCP'].flags & 0x2:
+                # SYN flag is set. The package was sent by the source of the
+                # connection.
+                con = Connection.objects.create(src_socket=src_socket,
+                                                dst_socket=dst_socket,
+                                                protocol_l567=p.proto,
+                                                first_seen=timezone.now(),
+                                                seq=p.seq,
+                                                syn_flag=True,
+                                                )
+            else:
+                # We missed the SYN packet. Source and destination infomation
+                # is not reliable. We assume the lower port is the source.
+                if p.sport <= p.dport:
+                    con = Connection.objects.create(src_socket=src_socket,
+                                                    dst_socket=dst_socket,
+                                                    protocol_l567=p.proto,
+                                                    first_seen=timezone.now(),
+                                                    seq=p.seq,
+                                                    )
+                else:
+                    con = Connection.objects.create(src_socket=dst_socket,
+                                                    dst_socket=src_socket,
+                                                    protocol_l567=p.proto,
+                                                    first_seen=timezone.now(),
+                                                    seq=p.seq,
+                                                    )
+
         else:
             con = Connection.objects.create(src_socket=src_socket,
                                             dst_socket=dst_socket,
