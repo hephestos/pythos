@@ -463,8 +463,8 @@ def packet_find_connections(p, src_socket, dst_socket):
                                                 )
             else:
                 # We missed the SYN packet. Source and destination infomation
-                # is not reliable. We assume the lower port is the source.
-                if p.sport <= p.dport:
+                # is not reliable. We assume the higher port is the source.
+                if p.sport >= p.dport:
                     con = Connection.objects.create(src_socket=src_socket,
                                                     dst_socket=dst_socket,
                                                     protocol_l567=p.proto,
