@@ -66,9 +66,6 @@ class Connection(models.Model):
     closed_flag = models.BooleanField(default=False)
     syn_flag = models.BooleanField(default=False)
 
-    class Meta:
-        unique_together = (('src_socket', 'dst_socket', 'protocol_l567'),)
-
 
 class DNScache(models.Model):
     site = models.ForeignKey('config.Site', default=1)
