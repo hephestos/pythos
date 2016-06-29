@@ -32,7 +32,7 @@ def guess_gateways_by_connections(threshold):
                                          distinct=True
                                          ),
                 ).filter(
-                    count_ips__gt=threshold,
+                    count_ips__gte=threshold,
                 )
 
     return gateways
@@ -134,15 +134,24 @@ def guess_networks_by_broadcasts():
 
 
 def identify_systems():
+    BYTE_SEPARATOR = ":"
+    LOW_MULTICAST = 1101088686080       # 01:00:5e:00:00:00
+    HIGH_MULTICAST = 1101097074687      # 01:00:5e:7f:ff:ff
+
     # create a new system for each unassigned MAC
-    first_interfaces = Interface.objects.values(
+    unassigned_macs = Interface.objects.values(
                                 'address_ether',
                             ).filter(
                                 system__isnull=True,
                             ).distinct()
-    # TODO exclude broadcast MAC
 
-    for interface in first_interfaces:
+    for interface in unassigned_macs:
+        ether_number = int(interface['address_ether'].replace(BYTE_SEPARATOR, ''), 16)
+
+        if interface['address_ether'] == "FF:FF:FF:FF:FF:FF" or
+           LOW_MULTICAST <= ether_number <= HIGH_MULTICAST
+            continue
+
         mac_group = Interface.objects.values(
                                 'address_ether',
                                 'system',
@@ -152,6 +161,8 @@ def identify_systems():
 
         new_system = System.objects.create()
         mac_group.update(system=new_system)
+
+    #TODO identify systems with adjacent mac addresses
 
 
 def packet_chunk(chunk, current_origin, packets):
