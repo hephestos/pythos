@@ -80,14 +80,14 @@ def guess_networks_by_broadcasts():
         # find the IP addresses that have sent packets
         # to this broadcast address
         source = Interface.objects.filter(
-                   address_inet=bcast['address_inet'],
-                ).exclude(
-                    sockets__dst_connections__src_socket__interface__address_inet="0.0.0.0",
-                ).values_list(
-                    'sockets__dst_connections__src_socket__interface__address_inet',
-                ).order_by(
-                    'sockets__dst_connections__src_socket__interface__address_inet',
-                ).first()
+                        address_inet=bcast['address_inet'],
+                    ).exclude(
+                        sockets__dst_connections__src_socket__interface__address_inet="0.0.0.0",
+                    ).values_list(
+                        'sockets__dst_connections__src_socket__interface__address_inet',
+                    ).order_by(
+                        'sockets__dst_connections__src_socket__interface__address_inet',
+                    ).first()
 
         if source:
             OCTET_SEPARATOR = "."
@@ -133,17 +133,17 @@ def guess_networks_by_broadcasts():
 
 
 def packet_chunk(chunk, current_origin, packets):
-        logging.info("Worker process with PID " + str(os.getpid()) +
-                     " has started."
-                     )
+    logging.info("Worker process with PID " + str(os.getpid()) +
+                 " has started."
+                 )
 
-        while not chunk.empty():
-            next_packet = chunk.get_nowait()
-            process_packet(next_packet(), current_origin)
+    while not chunk.empty():
+        next_packet = chunk.get_nowait()
+        process_packet(next_packet(), current_origin)
 
-        logging.info("Worker process with PID " + str(os.getpid()) +
-                     " has finished."
-                     )
+    logging.info("Worker process with PID " + str(os.getpid()) +
+                 " has finished."
+                 )
 
 
 class PicklablePacket:
@@ -162,25 +162,25 @@ class PicklablePacket:
 
 
 def add_packet(packets):
-        def add_to_queue(pkt):
-            pick_packet = PicklablePacket(pkt)
-            packets.put(pick_packet)
+    def add_to_queue(pkt):
+        pick_packet = PicklablePacket(pkt)
+        packets.put(pick_packet)
 
-        return add_to_queue
+    return add_to_queue
 
 
 def run_capture(interface, duration, packets):
-        sniff(iface=interface,
-              timeout=float(duration),
-              store=0,
-              prn=add_packet(packets)
-              )
+    sniff(iface=interface,
+          timeout=float(duration),
+          store=0,
+          prn=add_packet(packets)
+          )
 
 
 def read_pcap(filepath, packets):
-        sniff(offline=filepath,
-              prn=add_packet(packets)
-              )
+    sniff(offline=filepath,
+          prn=add_packet(packets)
+          )
 
 
 @profile
@@ -191,7 +191,7 @@ def process_packet(p, current_origin):
         return
 
     src_interface, dst_interface = \
-        packet_get_interfaces(p)
+        packet_get_interfaces(p, current_origin)
     if src_interface and dst_interface:
         src_socket, dst_socket = \
             packet_get_sockets(p, src_interface, dst_interface)
@@ -202,7 +202,7 @@ def process_packet(p, current_origin):
                 packet_find_dhcp_acks(p)
 
 
-def packet_get_interfaces(p):
+def packet_get_interfaces(p, current_origin):
     # Save the source interface
     try:
         if p.haslayer('IP'):
@@ -362,7 +362,7 @@ def packet_find_dhcp_acks(p):
                 # DHCP ACK
                 ip_network = IPNetwork(p['IP'].dst)
                 ip_network.prefixlen = sum([bin(int(x)).count('1') for x in
-                                            dhcp_opts['subnet_mask'].split('.')]
+                                           dhcp_opts['subnet_mask'].split('.')]
                                            )
 
                 gateway, new_gateway = \
@@ -385,7 +385,7 @@ def packet_find_dhcp_acks(p):
 
                 our_net, new_net = Net.objects.update_or_create(
                                     address_inet=str(ip_network.network),
-                                    defaults=updated_values_net, 
+                                    defaults=updated_values_net,
                                     )
         except AttributeError:
             print('Raised AttributeError when reading DHCP ACK from package:')

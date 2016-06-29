@@ -2,7 +2,7 @@ from django.conf.urls import url
 
 from . import views
 
-urlpatterns = [ 
+urlpatterns = [
         # Overview of identified systems[
         url(r'^$', views.IndexView.as_view(), name='index'),
         # Discovery control interface (trigger to capture traffic
