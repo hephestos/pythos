@@ -14,6 +14,7 @@ from profilehooks import profile
 
 # import project specific model classes
 from .models import Interface, Net, Socket, Connection, DNScache
+from .models import System
 from kb.models import OperatingSystem
 
 
@@ -130,6 +131,27 @@ def guess_networks_by_broadcasts():
                                            address_bcast=new_bcast,
                                            )
                     break
+
+
+def identify_systems():
+    # create a new system for each unassigned MAC
+    first_interfaces = Interface.objects.values(
+                                'address_ether',
+                            ).filter(
+                                system__isnull=True,
+                            ).distinct()
+    # TODO exclude broadcast MAC
+
+    for interface in first_interfaces:
+        mac_group = Interface.objects.values(
+                                'address_ether',
+                                'system',
+                            ).filter(
+                                address_ether=interface['address_ether'],
+                            )
+
+        new_system = System.objects.create()
+        mac_group.update(system=new_system)
 
 
 def packet_chunk(chunk, current_origin, packets):
