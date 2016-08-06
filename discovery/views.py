@@ -3,12 +3,18 @@ from django.views import generic
 from django_tables2 import RequestConfig
 from django.db.models import Sum, Min, Max
 
+from redis import Redis
+from rq import Queue
+
 from .models import Interface, Connection
 from .forms import ControlForm, PcapForm
 from .tasks import discovery_task
 
 from discovery.tables import ConversationsTable
 
+
+pythos_redis_conn = Redis(host='127.0.0.1', port=6379)
+q = Queue('default', connection=pythos_redis_conn)
 
 # Overview of identified systems
 class IndexView(generic.ListView):
@@ -27,7 +33,8 @@ def ControlView(request):
             capture_interface = form.cleaned_data['interface']
             capture_duration = form.cleaned_data['duration']
 
-            discovery_task.delay(origin_uuid="d44d8aa8c5ef495f992d7531336784fe",
+#            discovery_task.delay(origin_uuid="d44d8aa8c5ef495f992d7531336784fe",
+            q.enqueue(discovery_task,origin_uuid="d44d8aa8c5ef495f992d7531336784fe",
                                  offline=False,
                                  interface=capture_interface,
                                  duration=capture_duration)
