@@ -41,17 +41,39 @@ INSTALLED_APPS = (
     'django.contrib.messages',
     'django.contrib.staticfiles',
     # custom
+    'registration',
     'djangobower',
     'django_tables2',
+    'dash',
+    'dash.contrib.layouts.bootstrap2',
+    'dash.contrib.layouts.android',
+    'dash.contrib.layouts.pythos',
+    'dash.contrib.plugins.dummy',
+#    'dash.contrib.plugins.image',
+    'dash.contrib.plugins.memo',
+    'dash.contrib.plugins.rss_feed',
+    'dash.contrib.plugins.url',
+    'dash.contrib.plugins.video', # Video plugin for Dash
+    'dash.contrib.plugins.weather', # Weather plugin for Dash
+    'dash.contrib.plugins.pythos_barchart',
+    'dash.contrib.apps.public_dashboard', # Public dashboard app for Dash
 #    'django_otp',
 #    'django_otp.plugins.otp_static',
 #    'django_otp.plugins.otp_totp',
 #    'two_factor',
 #    'otp_yubikey',
     'django_nvd3',  # Django Wrapper for NVD3 - It's time for beautiful charts
+    # project
     'kb',           # System identification (e.g. OS)
     'discovery',    # Capturing network traffic, parse and store relevant data to database
     'config',       # Global configuration (e.g. sites overview, network interfaces)
+    'dashboard',
+
+    'tinymce', # TinyMCE
+    'easy_thumbnails', # Thumbnailer
+#    'localeurl', # Locale URL
+#    'slim', # Multi-lingual models app
+    'django_rq',
 )
 
 # See djangobower in INSTALLED_APPS
@@ -87,7 +109,6 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
-#                'django.core.context_processors.request',
             ],
         },
     },
@@ -101,7 +122,7 @@ WSGI_APPLICATION = 'pythos.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.mysql',
+        'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'pythos',
         'USER': 'pythos',
         'PASSWORD': 'pythos',
@@ -154,3 +175,12 @@ SECURE_HSTS_INCLUDE_SUBDOMAINS = False # True
 #from django.core.urlresolvers import reverse_lazy
 
 #LOGIN_URL = reverse_lazy('two_factor:login')
+
+# Django RQ
+RQ_QUEUES = {
+    'default': {
+        'HOST': 'localhost',
+        'PORT': 6379,
+        'DB': 0,
+    },
+}
