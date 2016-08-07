@@ -13,9 +13,6 @@ from .tasks import discovery_task
 from discovery.tables import ConversationsTable
 
 
-pythos_redis_conn = Redis(host='127.0.0.1', port=6379)
-q = Queue('default', connection=pythos_redis_conn)
-
 # Overview of identified systems
 class IndexView(generic.ListView):
     template_name = 'discovery/index.html'
@@ -33,8 +30,7 @@ def ControlView(request):
             capture_interface = form.cleaned_data['interface']
             capture_duration = form.cleaned_data['duration']
 
-#            discovery_task.delay(origin_uuid="d44d8aa8c5ef495f992d7531336784fe",
-            q.enqueue(discovery_task,origin_uuid="d44d8aa8c5ef495f992d7531336784fe",
+            discovery_task.delay(origin_uuid="d44d8aa8c5ef495f992d7531336784fe",
                                  offline=False,
                                  interface=capture_interface,
                                  duration=capture_duration)
@@ -52,9 +48,9 @@ def PcapView(request):
         form = PcapForm(request.POST)
         if form.is_valid():
             filepath = form.cleaned_data['filepath']
-            description = form.cleaned_data['origin_description']
+            description = "pcap" #form.cleaned_data['origin_description']
 
-            discovery_task(offline=True,
+            discovery_task.delay(offline=True,
                            filepath=filepath,
                            origin_description=description)
 

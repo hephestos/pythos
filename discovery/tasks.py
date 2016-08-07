@@ -23,7 +23,7 @@ from .utils import read_pcap
 
 pythos_redis_conn = Redis()
 
-@job('discovery_queue', connection=pythos_redis_conn)
+@job('default', connection=pythos_redis_conn)
 def discovery_task(origin_uuid="",
                    offline=False,
                    interface="",
