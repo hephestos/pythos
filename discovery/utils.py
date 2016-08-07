@@ -220,7 +220,7 @@ def read_pcap(filepath, packets):
           )
 
 
-#@profile
+@profile
 def process_packet(p, current_origin):
     if not p.haslayer('Ether'):
         # TODO consider packets without Ethernet layer
@@ -237,6 +237,7 @@ def process_packet(p, current_origin):
             if p.haslayer('IP'):
                 packet_find_dns_records(p)
                 packet_find_dhcp_acks(p)
+
 
 def packet_get_interfaces(p, current_origin):
     try:
@@ -320,7 +321,7 @@ def packet_get_interfaces(p, current_origin):
                             )
         else:
             dst_interface = Interface.objects.create(
-                                address_ether=p[0].dst,
+                                address_ether=p[Ether].dst,
                                 rx_pkts=1,
                                 rx_bytes=p.len,
                                 first_seen=timezone.now(),
