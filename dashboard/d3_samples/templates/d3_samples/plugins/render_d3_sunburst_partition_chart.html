@@ -1,0 +1,24 @@
+
+<div>
+    <strong>{{ plugin.data.title }}</strong>
+    <span id="chart-{{ plugin.html_id }}" ></span>
+    <form>
+        <label><input type="radio" name="mode" value="size"> Size</label>
+        <label><input type="radio" name="mode" value="count" checked> Count</label>
+    </form>
+    <script type="text/javascript">
+        // *****************************************************************
+        // ************************* Initialisation ************************
+        // *****************************************************************
+        $(document).ready(function(){
+
+            d3SunburstPartitionChartSample(
+                '#chart-{{ plugin.html_id }}', // element ID
+                {{ width }}, // width
+                {{ height}},
+                {{ STATIC_URL }}
+            );
+
+        });
+    </script>
+</div>
