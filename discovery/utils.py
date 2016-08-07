@@ -10,6 +10,9 @@ from django.db import IntegrityError
 # import third party modules
 from netaddr import IPNetwork
 from scapy.all import sniff, Ether
+from scapy.layers.inet import TCP, UDP, IP
+from scapy.layers.inet6 import IPv6
+from scapy.layers.l2 import Ether
 from profilehooks import profile
 
 # import project specific model classes
@@ -231,24 +234,23 @@ def process_packet(p, current_origin):
             packet_get_sockets(p, src_interface, dst_interface)
         if src_socket and dst_socket:
             packet_find_connections(p, src_socket, dst_socket)
-            if p.haslayer['IP']:
+            if p.haslayer('IP'):
                 packet_find_dns_records(p)
                 packet_find_dhcp_acks(p)
 
 
 def packet_get_interfaces(p, current_origin):
-    # Save the source interface
     try:
         if p.haslayer('IP'):
             src_interface = Interface.objects.get(
-                                address_ether=p['Ether'].src,
-                                address_inet=p['IP'].src,
+                                address_ether=p[Ether].src,
+                                address_inet=p[IP].src,
                                 origin=current_origin,
-                                ttl_seen__in=[0, p['IP'].ttl],
+                                ttl_seen__in=[0, p[IP].ttl],
                             )
         else:
             src_interface = Interface.objects.get(
-                                address_ether=p['Ether'].src,
+                                address_ether=p[Ether].src,
                                 address_inet__isnull=True,
                                 origin=current_origin,
                             )
@@ -261,17 +263,17 @@ def packet_get_interfaces(p, current_origin):
     except Interface.DoesNotExist:
         if p.haslayer('IP'):
             src_interface = Interface.objects.create(
-                                address_ether=p['Ether'].src,
-                                address_inet=p['IP'].src,
+                                address_ether=p[Ether].src,
+                                address_inet=p[IP].src,
                                 tx_pkts=1,
                                 tx_bytes=p.len,
-                                ttl_seen=p['IP'].ttl,
+                                ttl_seen=p[IP].ttl,
                                 first_seen=timezone.now(),
                                 origin=current_origin,
                             )
         else:
             src_interface = Interface.objects.create(
-                                address_ether=p['Ether'].src,
+                                address_ether=p[Ether].src,
                                 tx_pkts=1,
                                 tx_bytes=p.len,
                                 first_seen=timezone.now(),
@@ -292,13 +294,13 @@ def packet_get_interfaces(p, current_origin):
     try:
         if p.haslayer('IP'):
             dst_interface = Interface.objects.get(
-                                address_ether=p['Ether'].dst,
-                                address_inet=p['IP'].dst,
+                                address_ether=p[Ether].dst,
+                                address_inet=p[IP].dst,
                                 origin=current_origin,
                             )
         else:
             dst_interface = Interface.objects.get(
-                                address_ether=p['Ether'].dst,
+                                address_ether=p[Ether].dst,
                                 origin=current_origin,
                             )
 
@@ -310,8 +312,8 @@ def packet_get_interfaces(p, current_origin):
     except Interface.DoesNotExist:
         if p.haslayer('IP'):
             dst_interface = Interface.objects.create(
-                                address_ether=p['Ether'].dst,
-                                address_inet=p['IP'].dst,
+                                address_ether=p[Ether].dst,
+                                address_inet=p[IP].dst,
                                 rx_pkts=1,
                                 rx_bytes=p.len,
                                 first_seen=timezone.now(),
@@ -319,7 +321,7 @@ def packet_get_interfaces(p, current_origin):
                             )
         else:
             dst_interface = Interface.objects.create(
-                                address_ether=p['Ether'].dst,
+                                address_ether=p[Ether].dst,
                                 rx_pkts=1,
                                 rx_bytes=p.len,
                                 first_seen=timezone.now(),
@@ -342,32 +344,32 @@ def packet_get_interfaces(p, current_origin):
 def packet_get_sockets(p, src_interface, dst_interface):
     # Update the sockets
     try:
-        if p['Ether'].type == 0x0800:
+        if p[Ether].type == 0x0800:
             # IPv4
             src_socket, new_src_socket = Socket.objects.get_or_create(
                                             interface=src_interface,
-                                            port=p['IP'].sport,
-                                            protocol_l4=p['IP'].proto
+                                            port=p[IP].sport,
+                                            protocol_l4=p[IP].proto
                                             )
 
             dst_socket, new_dst_socket = Socket.objects.get_or_create(
                                             interface=dst_interface,
-                                            port=p['IP'].dport,
-                                            protocol_l4=p['IP'].proto
+                                            port=p[IP].dport,
+                                            protocol_l4=p[IP].proto
                                             )
 
-        elif p['Ether'].type == 0x86DD:
+        elif p[Ether].type == 0x86DD:
             # IPv6
             src_socket, new_src_socket = Socket.objects.get_or_create(
                                             interface=src_interface,
-                                            port=p['IP'].sport,
-                                            protocol_l4=p['IP'].nh
+                                            port=p[IPv6].sport,
+                                            protocol_l4=p[IPv6].nh
                                             )
 
             dst_socket, new_dst_socket = Socket.objects.get_or_create(
                                             interface=dst_interface,
-                                            port=p['IP'].dport,
-                                            protocol_l4=p['IP'].nh
+                                            port=p[IPv6].dport,
+                                            protocol_l4=p[IPv6].nh
                                             )
         else:
             # If we don't understand the protocol skip to the next package
@@ -390,11 +392,11 @@ def packet_find_dhcp_acks(p):
     # Find DHCP ACKs
     if p.sport == 67:
         try:
-            dhcp_opts = scapy_get_packet_options(p['DHCP'].options)
+            dhcp_opts = scapy_get_packet_options(p[DHCP].options)
 
             if dhcp_opts['message-type'] == 5:
                 # DHCP ACK
-                ip_network = IPNetwork(p['IP'].dst)
+                ip_network = IPNetwork(p[IP].dst)
                 ip_network.prefixlen = sum([bin(int(x)).count('1') for x in
                                            dhcp_opts['subnet_mask'].split('.')]
                                            )
@@ -429,34 +431,41 @@ def packet_find_dhcp_acks(p):
 def packet_find_connections(p, src_socket, dst_socket):
     # Update the connections
     try:
+        if p[Ether].type == 0x0800:
+            # IPv4
+            proto = p.proto
+
+        elif p[Ether].type == 0x86DD:
+            # IPv6
+            proto = p.nh
+
         con = Connection.objects.get(
                 Q(src_socket=src_socket) | Q(src_socket=dst_socket),
                 Q(dst_socket=dst_socket) | Q(dst_socket=src_socket),
-                protocol_l567=p.proto,
+                protocol_l567=proto,
                 closed_flag=False,
                 )
 
         setattr(con, 'tx_pkts', con.tx_pkts + 1)
         setattr(con, 'tx_bytes', con.tx_bytes + p.len)
 
-        if p.proto == 6:
-            # This is a TCP connection
+        if p.haslayer('TCP'):
             setattr(con, 'seq', p.seq)
-            if p['TCP'].flags & 0x2:
+            if p[TCP].flags & 0x2:
                 setattr(con, 'syn_flag', True)
-            if p['TCP'].flags & 0x5:
+            if p[TCP].flags & 0x5:
                 setattr(con, 'closed_flag', True)
 
         con.save()
 
     except Connection.DoesNotExist:
-        if p.proto == 6:
-            if p['TCP'].flags & 0x2:
+        if proto == 6:
+            if p[TCP].flags & 0x2:
                 # SYN flag is set. The package was sent by the source of the
                 # connection.
                 con = Connection.objects.create(src_socket=src_socket,
                                                 dst_socket=dst_socket,
-                                                protocol_l567=p.proto,
+                                                protocol_l567=proto,
                                                 first_seen=timezone.now(),
                                                 seq=p.seq,
                                                 syn_flag=True,
@@ -467,14 +476,14 @@ def packet_find_connections(p, src_socket, dst_socket):
                 if p.sport >= p.dport:
                     con = Connection.objects.create(src_socket=src_socket,
                                                     dst_socket=dst_socket,
-                                                    protocol_l567=p.proto,
+                                                    protocol_l567=proto,
                                                     first_seen=timezone.now(),
                                                     seq=p.seq,
                                                     )
                 else:
                     con = Connection.objects.create(src_socket=dst_socket,
                                                     dst_socket=src_socket,
-                                                    protocol_l567=p.proto,
+                                                    protocol_l567=proto,
                                                     first_seen=timezone.now(),
                                                     seq=p.seq,
                                                     )
@@ -482,7 +491,7 @@ def packet_find_connections(p, src_socket, dst_socket):
         else:
             con = Connection.objects.create(src_socket=src_socket,
                                             dst_socket=dst_socket,
-                                            protocol_l567=p.proto,
+                                            protocol_l567=proto,
                                             first_seen=timezone.now(),
                                             )
 

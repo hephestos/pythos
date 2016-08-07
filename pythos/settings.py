@@ -56,6 +56,7 @@ INSTALLED_APPS = (
 #    'two_factor',
 #    'otp_yubikey',
     'django_nvd3',  # Django Wrapper for NVD3 - It's time for beautiful charts
+    'django_rq',
 
     # Dash core, contrib layouts and apps
     'dash', # Dash core
@@ -184,6 +185,15 @@ SECURE_HSTS_INCLUDE_SUBDOMAINS = False # True
 ADMIN_TOOLS_MENU = 'admin_tools_dashboard.menu.CustomMenu'
 
 ACCOUNT_ACTIVATION_DAYS = 2
+
+# Django RQ
+RQ_QUEUES = {
+    'default': {
+        'HOST': 'localhost',
+        'PORT': 6379,
+        'DB': 0,
+    },
+}
 
 # Do not put any settings below this line
 try:
