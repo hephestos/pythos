@@ -7,6 +7,8 @@ import multiprocessing
 # import django modules
 
 # import third party modules
+from rq.decorators import job
+from redis import Redis
 
 # import project specific model classes
 from config.models import Origin
@@ -19,6 +21,10 @@ from .utils import run_capture
 from .utils import read_pcap
 
 
+pythos_redis_conn = Redis()
+
+
+@job('default', connection=pythos_redis_conn)
 def discovery_task(origin_uuid="",
                    offline=False,
                    interface="",

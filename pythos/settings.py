@@ -56,6 +56,7 @@ INSTALLED_APPS = (
 #    'two_factor',
 #    'otp_yubikey',
     'django_nvd3',  # Django Wrapper for NVD3 - It's time for beautiful charts
+    'django_rq',
 
     # Dash core, contrib layouts and apps
     'dash', # Dash core
@@ -63,7 +64,9 @@ INSTALLED_APPS = (
     'dash.contrib.layouts.bootstrap2', # Bootstrap 2 layouts for Dash
     # 'dash.contrib.layouts.bootstrap3', # Bootstrap 3 layouts for Dash
     'dash.contrib.layouts.windows8', # Windows 8 layout for Dash
+    'dash.contrib.layouts.pythos',
     'dash.contrib.plugins.pythos_barchart',
+    'dash.contrib.plugins.pythos_pcap',
     'dash.contrib.plugins.dummy', # Dummy (testing) plugin for Dash
     'dash.contrib.plugins.memo', # Memo plugin for Dash
     'dash.contrib.plugins.image', # Image plugin for Dash
@@ -184,6 +187,15 @@ SECURE_HSTS_INCLUDE_SUBDOMAINS = False # True
 ADMIN_TOOLS_MENU = 'admin_tools_dashboard.menu.CustomMenu'
 
 ACCOUNT_ACTIVATION_DAYS = 2
+
+# Django RQ
+RQ_QUEUES = {
+    'default': {
+        'HOST': 'localhost',
+        'PORT': 6379,
+        'DB': 0,
+    },
+}
 
 # Do not put any settings below this line
 try:

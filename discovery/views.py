@@ -3,6 +3,9 @@ from django.views import generic
 from django_tables2 import RequestConfig
 from django.db.models import Sum, Min, Max
 
+from redis import Redis
+from rq import Queue
+
 from .models import Interface, Connection
 from .forms import ControlForm, PcapForm
 from .tasks import discovery_task
@@ -45,11 +48,11 @@ def PcapView(request):
         form = PcapForm(request.POST)
         if form.is_valid():
             filepath = form.cleaned_data['filepath']
-            description = form.cleaned_data['origin_description']
+            description = "pcap"  # form.cleaned_data['origin_description']
 
-            discovery_task(offline=True,
-                           filepath=filepath,
-                           origin_description=description)
+            discovery_task.delay(offline=True,
+                                 filepath=filepath,
+                                 origin_description=description)
 
             return render(request, 'discovery/pcap.html', {'form': form})
     else:
