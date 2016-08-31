@@ -19,6 +19,12 @@ class System(models.Model):
     os = models.ForeignKey('kb.OperatingSystem', null=True, blank=True)
 
 
+class Packet(models.Model):
+    origin = models.ForeignKey('config.Origin', null=True, blank=True)
+    pkt_bytes = models.BinaryField(null=True)
+    pkt_time = models.DateTimeField(auto_now=False, null=True)
+
+
 # Interface as an interface belonging to an identified system.
 # NOT the interface used for capturing traffic!
 class Interface(models.Model):

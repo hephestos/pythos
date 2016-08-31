@@ -1,6 +1,7 @@
 # import python modules
 import logging
 import os
+from datetime import datetime
 
 # import django modules
 from django.utils import timezone
@@ -16,7 +17,7 @@ from scapy.layers.l2 import Ether
 from profilehooks import profile
 
 # import project specific model classes
-from .models import Interface, Net, Socket, Connection, DNScache
+from .models import Packet, Interface, Net, Socket, Connection, DNScache
 from .models import System
 from kb.models import OperatingSystem
 
@@ -226,6 +227,12 @@ def process_packet(p, current_origin):
         # TODO consider packets without Ethernet layer
         #      (e.g. traffic captured from within a tunnel)
         return
+
+    new_packet = Packet.objects.create(
+                    origin=current_origin,
+                    pkt_bytes=p.__bytes__()[0:64],
+                    pkt_time=datetime.fromtimestamp(p.time),
+                 )
 
     src_interface, dst_interface = \
         packet_get_interfaces(p, current_origin)
