@@ -27,3 +27,11 @@ Pythos is analyzing the network traffic to identify
 - [...]
 
 The aggregated information results in network diagrams for a network architecture overview.
+
+## State of development
+
+### Branches
+
+- master: Will be the stable branch in the future. At the moment it carries a very early proof-of-concept version of Pythos.
+- develop: This is where the development takes place and will in the future carry the unstable branch. It should always contain a runnable version of Pythos.
+- develop sub-branches: Used for experimentation with new features. Those have to be considered to be in a testing state.
