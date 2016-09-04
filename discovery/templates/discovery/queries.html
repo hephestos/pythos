@@ -1,0 +1,136 @@
+{% load staticfiles %}
+{% load render_table from django_tables2 %}
+<!doctype html>
+<html>
+    <head>
+        <link rel="stylesheet" href="{% static "django_tables2/themes/paleblue/css/screen.css" %}" />
+        <link rel="stylesheet" href="{% static "discovery/d3_js/diagrams/dendrogram.css" %}" />
+
+	<script src="{% static "discovery/d3_js/d3.js" %}"></script>
+
+    </head>
+
+    # TODO: Extract the logic from client side and implement them on server side (e.g. unique values for branches)
+
+    <body>
+        <h3>Central points of communication</h3>
+          <p>Those systems are highlighted that communicate the most with other systems (e.g. proxy server, anti virus server, f
+ile server). The pattern used is how many single conversations have the same destination IP and port.</p>
+          {% render_table table %}
+
+        <h4> Dendrogram (D3.js)</h4>
+        Source: bl.ocks.org/mbostock/4063570
+
+	# Build JSON data object for diagram
+	<script>
+	  var root_name = "o";
+	  // Level 1 needs unique values - therefore Set
+	  var chartdata_level1_set = new Set();
+	  var chartdata_level2_set = new Set();
+	
+	  // Init JSON array for Tree view of D3.js
+	  var chartdata = [ { id: root_name, value : "TEST" } ];
+ 
+	  // Setup the chartdata tree (1st level) - IMPORTANT: Values MUST be unique!!!
+	  {% for entry in chartdata %}
+		dst = "{{ entry.dst_socket__interface__address_inet }}".replace(/\./g,"-");
+		chartdata_level1_set.add(dst);
+	  {% endfor %}
+
+	  chartdata_level1_set.forEach(function (item) {
+		chartdata.push( {id : root_name + "." + item, value: "TEST" } );
+	  });
+
+	  // Setup the chartdata tree (2nd level)
+          {% for entry in chartdata %}
+                src = "{{ entry.src_socket__interface__address_inet }}".replace(/\./g,"-");
+                dst = "{{ entry.dst_socket__interface__address_inet }}".replace(/\./g,"-");
+		port = "{{ entry.dst_socket__port }}";
+                connection = root_name + "." + dst + "." + src + " (Port: " + port + ")";
+		chartdata_level2_set.add(connection);
+                //chartdata.push( { id: connection, value: port });
+          {% endfor %}
+
+	  chartdata_level2_set.forEach(function (item) {
+		  chartdata.push( {id : item, value: "TEST" } );
+	  });
+
+
+	  // Debugging
+	  // IMPORTANT: The chart only works when intermediate branches are unique!!! (e.g. destination IP)
+	  //            The intermediate branches must be initialized first (alone!) before extending 
+	  //		subbranches (e.g. souce IP)
+	  //chartdata.push( { id: "root.10-1-1-1", value: "TEST" } );
+	  //chartdata.push( { id: "root.10-1-1-1.1", value: "TEST" } );
+	  //chartdata.push( { id: "root.225-1-1-4.test", value: "TEST" } );
+
+
+	  //var chartdataa = [ 
+	  //	{ id : "root", value : "TEST" }, 
+	  //        { id : "root.destination", value : "source3" },	
+	  //	{ id : "root.destination.t", value : "source4" },
+	  //	{ id : "root.destination.t", value : "source4" }
+	  //];
+
+	
+
+	</script>
+
+	# Diagram picture
+	<svg width="960" height="2000"></svg>
+
+	<script>
+
+var svg = d3.select("svg"),
+    width = +svg.attr("width"),
+    height = +svg.attr("height"),
+    g = svg.append("g").attr("transform", "translate(40,0)");
+
+var tree = d3.cluster()
+    .size([height, width - 160]);
+
+var stratify = d3.stratify()
+    .parentId(function(d) { return d.id.substring(0, d.id.lastIndexOf(".")); });
+
+//d3.csv("{% static "discovery/d3_js/flare.csv" %}", function(error, data) {
+ // if (error) throw error;
+ 
+
+  var root = stratify(chartdata)
+      .sort(function(a, b) { return (a.height - b.height) || a.id.localeCompare(b.id); });
+
+  tree(root);
+
+  var link = g.selectAll(".link")
+      .data(root.descendants().slice(1))
+    .enter().append("path")
+      .attr("class", "link")
+      .attr("d", function(d) {
+        return "M" + d.y + "," + d.x
+            + "C" + (d.parent.y + 100) + "," + d.x
+            + " " + (d.parent.y + 100) + "," + d.parent.x
+            + " " + d.parent.y + "," + d.parent.x;
+      });
+
+  var node = g.selectAll(".node")
+      .data(root.descendants())
+    .enter().append("g")
+      .attr("class", function(d) { return "node" + (d.children ? " node--internal" : " node--leaf"); })
+      .attr("transform", function(d) { return "translate(" + d.y + "," + d.x + ")"; })
+
+  node.append("circle")
+      .attr("r", 2.5);
+
+  node.append("text")
+      .attr("dy", 3)
+      .attr("x", function(d) { return d.children ? -8 : 8; })
+      .style("text-anchor", function(d) { return d.children ? "end" : "start"; })
+      .text(function(d) { return d.id.substring(d.id.lastIndexOf(".") + 1); });
+//});
+
+
+      </script>
+	
+    </body>
+
+</html>

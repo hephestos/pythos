@@ -20,3 +20,17 @@ class ConversationsTable(tables.Table):
                 model = Connection
                 # add class="paleblue" to <table> tag
                 attrs = {"class": "paleblue"}
+
+
+class IdentifyCentralSystemsTable(tables.Table):
+        port = tables.Column(accessor='dst_socket__port')
+        dst_ip_addr = tables.Column(accessor='dst_socket__interface__address_inet')
+        dest_ip_counter = tables.Column(accessor='dest_ip_counter')
+
+        class Meta:
+                fields = ['dst_ip_addr',
+                          'port',
+                          'dest_ip_counter',
+                        ]
+                model = Connection
+                attrs = {"class": "paleblue"}

@@ -15,4 +15,6 @@ urlpatterns = [
         # Overview of identified conversations
         # (per IP address and used ports in both directions)
         url(r'^conversations/$', views.ConversationsView, name='conversations'),
+        # Added identification of central systems (many connections to one system)
+        url(r'^queries/$', views.QueriesView, name='queries'),
 ]

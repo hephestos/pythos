@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from django.views import generic
 from django_tables2 import RequestConfig
-from django.db.models import Sum, Min, Max
+from django.db.models import Sum, Min, Max, Count
 
 from redis import Redis
 from rq import Queue
@@ -11,6 +11,7 @@ from .forms import ControlForm, PcapForm
 from .tasks import discovery_task
 
 from discovery.tables import ConversationsTable
+from discovery.tables import IdentifyCentralSystemsTable
 
 
 # Overview of identified systems
@@ -103,3 +104,37 @@ def ConversationsView(request):
     table = ConversationsTable(Connection.objects.all())
     RequestConfig(request).configure(table)
     return render(request, 'discovery/conversations.html', {'table': table})
+
+
+# Queries: Identify central systems (by amount of connections to one system)
+def QueriesView(request):
+    # Result table with overview
+    table = IdentifyCentralSystemsTable(Connection.objects.values('dst_socket__interface__address_inet','dst_socket__port').annotate(dest_ip_counter=Count('dst_socket__interface__address_inet')).order_by('-dest_ip_counter'))
+
+
+    # D3.js graph
+    central_systems_objects = Connection.objects.values(
+				'dst_socket__interface__address_inet',
+				'dst_socket__port',
+                                'src_socket__interface__address_inet')
+			#).annotate(
+			#	dest_ip_counter=Count('dst_socket__interface__address_inet')
+			#).order_by('-dest_ip_counter')
+
+    # prepare chart
+    dst_ip = central_systems_objects.values_list('dst_socket__interface__address_inet', flat=True)
+    src_ip = central_systems_objects.values_list('src_socket__interface__address_inet', flat=True)
+    dst_port = central_systems_objects.values_list('dst_socket__port', flat=True)
+
+    chartdata = {
+            'dst': dst_ip, 'src': src_ip, 'port' : dst_port
+    }
+
+    RequestConfig(request).configure(table)
+    return render(request, 'discovery/queries.html', {
+        'table': table,
+        #'chartdata': chartdata
+	'chartdata' : central_systems_objects
+        }
+    )
+
