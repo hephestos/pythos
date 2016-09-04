@@ -1,22 +1,24 @@
 .node circle {
-  fill: #999;
+  fill: darkred;
 }
 
 .node text {
-  font: 10px sans-serif;
+  font: 16px sans-serif;
+  font-weight: bold;
+  stroke-width: 20px;
 }
 
 .node--internal circle {
-  fill: #555;
+  fill: #darkgreen;
 }
 
 .node--internal text {
-  text-shadow: 0 1px 0 #fff, 0 -1px 0 #fff, 1px 0 0 #fff, -1px 0 0 #fff;
 }
+
 
 .link {
   fill: none;
-  stroke: #555;
-  stroke-opacity: 0.4;
-  stroke-width: 1.5px;
+  stroke: green;
+  stroke-opacity: 0.6;
+  stroke-width: 2.5px;
 }

@@ -25,10 +25,12 @@ class ConversationsTable(tables.Table):
 class IdentifyCentralSystemsTable(tables.Table):
         port = tables.Column(accessor='dst_socket__port')
         dst_ip_addr = tables.Column(accessor='dst_socket__interface__address_inet')
+        src_ip_addr = tables.Column(accessor='src_socket__interface__address_inet')
         dest_ip_counter = tables.Column(accessor='dest_ip_counter')
 
         class Meta:
                 fields = ['dst_ip_addr',
+                          'src_ip_addr',
                           'port',
                           'dest_ip_counter',
                         ]

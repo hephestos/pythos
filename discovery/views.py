@@ -106,35 +106,26 @@ def ConversationsView(request):
     return render(request, 'discovery/conversations.html', {'table': table})
 
 
+# Queries: Overview
+def QueriesOverviewView(request):
+    return render(request, 'discovery/queries.html')
+
+
 # Queries: Identify central systems (by amount of connections to one system)
-def QueriesView(request):
+def QueriesIdentifyCentralSystemsView(request):
     # Result table with overview
-    table = IdentifyCentralSystemsTable(Connection.objects.values('dst_socket__interface__address_inet','dst_socket__port').annotate(dest_ip_counter=Count('dst_socket__interface__address_inet')).order_by('-dest_ip_counter'))
+    table = IdentifyCentralSystemsTable(Connection.objects.values('dst_socket__interface__address_inet').annotate(dest_ip_counter=Count('dst_socket__interface__address_inet')).order_by('-dest_ip_counter'))
 
 
     # D3.js graph
-    central_systems_objects = Connection.objects.values(
-				'dst_socket__interface__address_inet',
-				'dst_socket__port',
-                                'src_socket__interface__address_inet')
-			#).annotate(
-			#	dest_ip_counter=Count('dst_socket__interface__address_inet')
-			#).order_by('-dest_ip_counter')
-
-    # prepare chart
-    dst_ip = central_systems_objects.values_list('dst_socket__interface__address_inet', flat=True)
-    src_ip = central_systems_objects.values_list('src_socket__interface__address_inet', flat=True)
-    dst_port = central_systems_objects.values_list('dst_socket__port', flat=True)
-
-    chartdata = {
-            'dst': dst_ip, 'src': src_ip, 'port' : dst_port
-    }
+    central_systems_objects_level1 = Connection.objects.values('dst_socket__interface__address_inet').distinct()
+    central_systems_objects_level2 = Connection.objects.values('dst_socket__interface__address_inet','src_socket__interface__address_inet').distinct()
 
     RequestConfig(request).configure(table)
-    return render(request, 'discovery/queries.html', {
+    return render(request, 'discovery/queriesIdentifyCentralSystems.html', {
         'table': table,
-        #'chartdata': chartdata
-	'chartdata' : central_systems_objects
+        'chartdata_level1' : central_systems_objects_level1,
+        'chartdata_level2' : central_systems_objects_level2
         }
     )
 

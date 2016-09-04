@@ -1,0 +1,128 @@
+{% load staticfiles %}
+{% load render_table from django_tables2 %}
+<!doctype html>
+<html>
+    <head>
+        <link rel="stylesheet" href="{% static "django_tables2/themes/paleblue/css/screen.css" %}" />
+        <link rel="stylesheet" href="{% static "discovery/d3_js/diagrams/dendrogram.css" %}" />
+
+	<script src="{% static "discovery/d3_js/d3.js" %}"></script>
+
+    </head>
+
+    <body>
+        <h3>Central points of communication</h3>
+          <p>Those systems are highlighted that communicate the most with other systems (e.g. proxy server, anti virus server, f
+ile server). The pattern used is how many single conversations have the same destination IP and port.</p>
+	  <p> TODO: There is an error in the statistics table as the database counts IP addresses multiple times due to the TTL field. We have to clarify how to analyze the data properly or the db layout has to be customized.</p>
+          {% render_table table %}
+
+        <h3> Dendrogram (D3.js)</h3>
+	<p>The following graphic shows "SERVER" <-> "CLIENT" relationships.
+	<p>Based on the example of <a href="http://bl.ocks.org/mbostock/4063570">http://bl.ocks.org/mbostock/4063570</a></p>
+
+
+	<script>
+	  var root_name = "o";
+
+	  // Init JSON array for Tree view of D3.js
+	  var chartdata = [ { id: root_name, value : "TEST" } ];
+ 
+	  // Setup the chartdata tree (1st level) - IMPORTANT: Values MUST be unique!!!
+	  {% for entry in chartdata_level1 %}
+	      	{% if entry.dst_socket__interface__address_inet %}
+		  dst = "{{ entry.dst_socket__interface__address_inet }}".replace(/\./g,"-");
+		  chartdata.push( { id : root_name + "." + dst, value : "TEST" } );
+		{% endif %}
+	  {% endfor %}
+
+	  // Setup the chartdata tree (2nd level)
+          {% for entry in chartdata_level2 %}
+	  	{% if entry.dst_socket__interface__address_inet %}
+                  src = "{{ entry.src_socket__interface__address_inet }}".replace(/\./g,"-");
+                  dst = "{{ entry.dst_socket__interface__address_inet }}".replace(/\./g,"-");
+                  connection = root_name + "." + dst + "." + src ;
+                  chartdata.push( { id: connection, value: "TEST" });
+		{% endif %}
+          {% endfor %}
+
+
+	</script>
+
+	<svg width="960" height="2000"></svg>
+
+	<script>
+
+var svg = d3.select("svg"),
+    width = +svg.attr("width"),
+    height = +svg.attr("height"),
+    g = svg.append("g").attr("transform", "translate(40,0)");
+
+var tree = d3.cluster()
+    .size([height, width - 160]);
+
+var stratify = d3.stratify()
+    .parentId(function(d) { return d.id.substring(0, d.id.lastIndexOf(".")); });
+
+  // chartdata = result table from django
+  var root = stratify(chartdata)
+      .sort(function(a, b) { return (a.height - b.height) || a.id.localeCompare(b.id); });
+
+  tree(root);
+
+  var link = g.selectAll(".link")
+      .data(root.descendants().slice(1))
+    .enter().append("path")
+      .attr("class", "link")
+      .attr("d", function(d) {
+        return "M" + d.y + "," + d.x
+            + "C" + (d.parent.y + 100) + "," + d.x
+            + " " + (d.parent.y + 100) + "," + d.parent.x
+            + " " + d.parent.y + "," + d.parent.x;
+      });
+
+  var node = g.selectAll(".node")
+      .data(root.descendants())
+    .enter().append("g")
+      .attr("class", function(d) { return "node" + (d.children ? " node--internal" : " node--leaf"); })
+      .attr("transform", function(d) { return "translate(" + d.y + "," + d.x + ")"; })
+
+  node.append("circle")
+      .attr("r", 4.5);
+
+
+  node.append("rect").transition().duration(500).attr("width", 115)
+      .attr("height", 25)
+      .attr("x", function(d) { 
+	     // Root node
+	     if (d.parent == null) {
+	       return -500;
+	     }
+	     // Destination IP node
+	     else if (d.children) {
+	       return -110;
+	     }
+	     // Source IP node
+	     else {
+	       return 0;
+	     }
+      })
+      .attr("y", -15)
+      .attr("rx", 20)
+      .attr("ry", 20)
+      .style("fill", "red")
+      .style("opacity", "0.3")
+      .attr("stroke", "darkred")
+
+  node.append("text")
+      .attr("dy", 3)
+      .attr("x", function(d) { return d.children ? -8 : 8; })
+      .style("text-anchor", function(d) { return d.children ? "end" : "start"; })
+      .text(function(d) { return d.id.substring(d.id.lastIndexOf(".") + 1); });
+
+
+      </script>
+	
+    </body>
+
+</html>
