@@ -23,6 +23,10 @@ class Packet(models.Model):
     origin = models.ForeignKey('config.Origin', null=True, blank=True)
     pkt_bytes = models.BinaryField(null=True)
     pkt_time = models.DateTimeField(auto_now=False, null=True)
+    first_layer = models.CharField(max_length=127, null=True, blank=True)
+    payload_hash = models.BigIntegerField(null=True)
+    processed_flag = models.BooleanField(default=False)
+    failed_flag = models.BooleanField(default=False)
 
 
 # Interface as an interface belonging to an identified system.
@@ -34,7 +38,6 @@ class Interface(models.Model):
     address_ether = MACAddressField(integer=False, null=True, blank=True)
     address_inet = models.GenericIPAddressField(null=True, blank=True)
     distance = models.IntegerField(default=-1)
-    protocol_l3 = models.IntegerField(default=0)
     tx_pkts = models.BigIntegerField(default=0)
     tx_bytes = models.BigIntegerField(default=0)
     rx_pkts = models.BigIntegerField(default=0)
@@ -44,26 +47,26 @@ class Interface(models.Model):
     last_seen = models.DateTimeField(auto_now=True, null=True)
 
     class Meta:
-        unique_together = (('address_ether', 'address_inet', 'origin', 'ttl_seen'),)
+        unique_together = (('address_ether', 'address_inet', 'origin',),)
 
 
 class Socket(models.Model):
     interface = models.ForeignKey('Interface', related_name='sockets')
     port = models.IntegerField(default=0)
-    protocol_l4 = models.IntegerField(default=0)
+    protocol_l3 = models.IntegerField(default=0)
 #    service_port = models.ForeignKey('config.Service', related_name='+', default=1)
 #    service_detec = models.ForeignKey('config.Service', related_name='+', default=1)
     service_port = models.IntegerField(default=0)
     service_detec = models.IntegerField(default=0)
 
     class Meta:
-        unique_together = (('interface', 'port', 'protocol_l4'),)
+        unique_together = (('interface', 'port', 'protocol_l3'),)
 
 
 class Connection(models.Model):
     src_socket = models.ForeignKey('Socket', related_name='src_connections')
     dst_socket = models.ForeignKey('Socket', related_name='dst_connections')
-    protocol_l567 = models.IntegerField(default=-1)
+    protocol_l4 = models.IntegerField(default=0)
     seq = models.BigIntegerField(default=-1, db_index=True)
     tx_pkts = models.BigIntegerField(default=0)
     tx_bytes = models.BigIntegerField(default=0)

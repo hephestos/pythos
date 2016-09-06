@@ -22,7 +22,27 @@ from .models import System
 from kb.models import OperatingSystem
 
 
+class PicklablePacket:
+    """A container for scapy packets that can be pickled (in contrast
+    to scapy packets themselves).
+    This works for python 3.5.1 and scapy 3.0.0"""
+
+    def __init__(self, pkt):
+        self.__contents = pkt.__bytes__()
+        self.__time = pkt.time
+
+    def __call__(self):
+        """Get the original scapy packet."""
+        pkt = Ether(self.__contents)
+        pkt.time = self.__time
+        return pkt
+
+
 def guess_gateways_by_connections(threshold):
+    """ Identifies gateways by querying for MAC addresses with a number of
+        IP addresses that is greater than or equal to the threshold value
+        given as a parameter. """
+
     gateways = Interface.objects.values(
                     'address_ether',
                 ).annotate(
@@ -43,6 +63,10 @@ def guess_gateways_by_connections(threshold):
 
 
 def guess_distances_by_ttl():
+    """ Determines the distance (number of hops) between the sensor and the
+        source interface by assuming the initial TTL to have been a default
+        value of a known operating system. """
+
     for interface in Interface.objects.all():
         if interface.ttl_seen > 0:
             default_ttl = OperatingSystem.objects.filter(
@@ -59,6 +83,22 @@ def guess_distances_by_ttl():
 
 
 def guess_networks_by_broadcasts():
+    """ Queries for source IP addresses that send packets to broadcast
+        addresses (MAC set to FF:FF:FF:FF:FF:FF), where the source IP
+        address does not fall within the range of an already known network.
+
+        For these packets the part of the source IP address that is identical
+        to the destination IP address (which is assumed to be the broadcast
+        address), is assumed to be the network address of the network the
+        source IP belongs to.
+
+        Using this information a new network is the created and stored in the
+        database.
+
+        TODO: Assign the newly created network to the source and destination
+              interfaces of the broadbast right away. """
+
+
     # get known networks
     known_netaddresses = []
 
@@ -138,6 +178,10 @@ def guess_networks_by_broadcasts():
 
 
 def identify_systems():
+    """ Scans the database for interfaces that have not yet been assigned to a
+        system, groups them by MAC address, excludes broadcast and multicast,
+        creates systems and assigned the interfaces to these systems. """
+
     BYTE_SEPARATOR = ":"
     LOW_MULTICAST = 1101088686080       # 01:00:5e:00:00:00
     HIGH_MULTICAST = 1101097074687      # 01:00:5e:7f:ff:ff
@@ -170,36 +214,28 @@ def identify_systems():
     # TODO identify systems with adjacent mac addresses
 
 
-def packet_chunk(chunk, current_origin, packets):
+def packet_chunk(chunk, origin_id, packets):
+    """ Pops packets from a chunk and hands them over to process_packet()
+        for processing. """
+
     logging.info("Worker process with PID " + str(os.getpid()) +
                  " has started."
                  )
 
     while not chunk.empty():
         next_packet = chunk.get_nowait()
-        process_packet(next_packet(), current_origin)
+        store_packet(next_packet(), origin_id)
 
     logging.info("Worker process with PID " + str(os.getpid()) +
                  " has finished."
                  )
 
 
-class PicklablePacket:
-    """A container for scapy packets that can be pickled (in contrast
-    to scapy packets themselves).
-    This works for python 3.5.1 and scapy 3.0.0 """
-    def __init__(self, pkt):
-        self.__contents = pkt.__bytes__()
-        self.__time = pkt.time
-
-    def __call__(self):
-        """Get the original scapy packet."""
-        pkt = Ether(self.__contents)
-        pkt.time = self.__time
-        return pkt
-
-
 def add_packet(packets):
+    """ Adds a packet to the processing queue. This is just used to be able
+        to pass the second parameter 'packets' to the function given to the
+        scapy sniff() function's prn parameter. """
+
     def add_to_queue(pkt):
         pick_packet = PicklablePacket(pkt)
         packets.put(pick_packet)
@@ -208,6 +244,9 @@ def add_packet(packets):
 
 
 def run_capture(interface, duration, packets):
+    """ Starts a live capture from one of the systems network adapters
+        and calls add_packet() for each packet captured. """
+
     sniff(iface=interface,
           timeout=float(duration),
           store=0,
@@ -216,26 +255,59 @@ def run_capture(interface, duration, packets):
 
 
 def read_pcap(filepath, packets):
+    """ Reads a pcap from a file and calls add_packet()
+        for each packet read. """
+
     sniff(offline=filepath,
           prn=add_packet(packets)
           )
 
 
 @profile
-def process_packet(p, current_origin):
-    if not p.haslayer('Ether'):
-        # TODO consider packets without Ethernet layer
-        #      (e.g. traffic captured from within a tunnel)
-        return
+def store_packet(p, origin_id):
+    """ Stores a new packet in the database. Only the first 64 bytes
+        of the packet are stored. """
+
+    max_store_size = 64
 
     new_packet = Packet.objects.create(
-                    origin=current_origin,
-                    pkt_bytes=p.__bytes__()[0:64],
+                    origin=origin_id,
+                    pkt_bytes=bytes(p)[:max_store_size],
                     pkt_time=datetime.fromtimestamp(p.time),
+                    first_layer=p.firstlayer().name,
+                    payload_hash=hash(bytes(p.payload)),
                  )
 
+
+@profile     
+def process_unprocessed_packets():
+    """ Fetches all stored packets from the database for which the
+        processed flag is not set, reassembles a scapy packet object
+        and calls process_packet() for each object. """
+
+    unprocessed_packets = Packet.objects.all().filter(processed_flag=False,
+                                                      failed_flag=False,)
+
+    for pkt_object in unprocessed_packets:
+        process_packet(pkt_object)
+
+
+@profile
+def process_packet(pkt_object):
+    """ Detects the flavour of the packet and calls the appropriate
+        processing functions. """
+
+    try:
+        p = Ether(bytes(pkt_object.pkt_bytes))
+        p.time = datetime.timestamp(pkt_object.pkt_time)
+
+    except:
+        print('>>> Could not assemble scapy packet from database entry:')
+        print('    ' + str(pkt_object) + '\n')
+        return False
+
     src_interface, dst_interface = \
-        packet_get_interfaces(p, current_origin)
+        packet_get_interfaces(p, pkt_object.origin)
     if src_interface and dst_interface:
         src_socket, dst_socket = \
             packet_get_sockets(p, src_interface, dst_interface)
@@ -244,26 +316,58 @@ def process_packet(p, current_origin):
             if p.haslayer('IP'):
                 packet_find_dns_records(p)
                 packet_find_dhcp_acks(p)
+        setattr(pkt_object, 'first_layer', p[0].name)
+        setattr(pkt_object, 'processed_flag', True)
+    else:
+        setattr(pkt_object, 'failed_flag', True)
+
+    pkt_object.save()
 
 
-def packet_get_interfaces(p, current_origin):
+def packet_get_interfaces(p, origin_id):
+    """ Extracts the source and destination interfaces from a packet and
+        stores or updates this information in the database. """
+
+    # Make sure we are dealing with a readable packet
     try:
-        if p.haslayer('IP'):
+        assert(p.haslayer('Ether') or p.haslayer('IP'))
+
+    except AssertionError:
+        print('>>> This packet has none of the layers we require:')
+        print('    ' + p.summary() + '\n')
+        return (False, False)
+
+    except:
+        print('>>> This does not seem to be a scapy packet:')
+        print('    ' + p + '\n')
+        return (False, False)
+
+
+    # Save the source interface
+    try:
+        if p.haslayer('Ether') and p.haslayer('IP'):
             src_interface = Interface.objects.get(
                                 address_ether=p[Ether].src,
                                 address_inet=p[IP].src,
-                                origin=current_origin,
-                                ttl_seen__in=[0, p[IP].ttl],
+                                origin=origin_id,
                             )
-        else:
+        elif p.haslayer('Ether'):
             src_interface = Interface.objects.get(
                                 address_ether=p[Ether].src,
                                 address_inet__isnull=True,
-                                origin=current_origin,
+                                origin=origin_id,
                             )
+        elif p.haslayer('IP'):
+            src_interface = Interface.objects.get(
+                                address_ether__isnull=True,
+                                address_inet=p[IP].src,
+                                origin=origin_id,
+                            )
+        # else cannot happen because of assertion
 
         setattr(src_interface, 'tx_pkts', src_interface.tx_pkts + 1)
         setattr(src_interface, 'tx_bytes', src_interface.tx_bytes + p.len)
+        setattr(src_interface, 'ttl_seen', p[IP].ttl)
 
         src_interface.save()
 
@@ -276,7 +380,7 @@ def packet_get_interfaces(p, current_origin):
                                 tx_bytes=p.len,
                                 ttl_seen=p[IP].ttl,
                                 first_seen=timezone.now(),
-                                origin=current_origin,
+                                origin=origin_id,
                             )
         else:
             src_interface = Interface.objects.create(
@@ -284,32 +388,40 @@ def packet_get_interfaces(p, current_origin):
                                 tx_pkts=1,
                                 tx_bytes=p.len,
                                 first_seen=timezone.now(),
-                                origin=current_origin,
+                                origin=origin_id,
                             )
 
-    except AttributeError:
-        print('Raised AttributeError when reading source from package:')
-        print(p.summary)
+    except IntegrityError:
         return (False, False)
 
-    except IntegrityError:
-        # Since we are not thread-safe,
-        # we ignore attempts to create duplicate entries
-        pass
+    except:
+        print('>>> Exception while reading source interface:')
+        print('    ' + p.summary() + '\n')
+        raise
+        return (False, False)
+
 
     # Save the destination interface
     try:
-        if p.haslayer('IP'):
+        if p.haslayer('Ether') and p.haslayer('IP'):
             dst_interface = Interface.objects.get(
                                 address_ether=p[Ether].dst,
                                 address_inet=p[IP].dst,
-                                origin=current_origin,
+                                origin=origin_id,
                             )
-        else:
+        elif p.haslayer('Ether'):
             dst_interface = Interface.objects.get(
                                 address_ether=p[Ether].dst,
-                                origin=current_origin,
+                                address_inet__isnull=True,
+                                origin=origin_id,
                             )
+        elif p.haslayer('IP'):
+            dst_interface = Interface.objects.get(
+                                address_ether__isnull=True,
+                                address_inet=p[IP].dst,
+                                origin=origin_id,
+                            )
+        # else cannot happen because of assertion
 
         setattr(dst_interface, 'rx_pkts', dst_interface.rx_pkts + 1)
         setattr(dst_interface, 'rx_bytes', dst_interface.rx_bytes + p.len)
@@ -324,7 +436,7 @@ def packet_get_interfaces(p, current_origin):
                                 rx_pkts=1,
                                 rx_bytes=p.len,
                                 first_seen=timezone.now(),
-                                origin=current_origin,
+                                origin=origin_id,
                             )
         else:
             dst_interface = Interface.objects.create(
@@ -332,124 +444,126 @@ def packet_get_interfaces(p, current_origin):
                                 rx_pkts=1,
                                 rx_bytes=p.len,
                                 first_seen=timezone.now(),
-                                origin=current_origin,
+                                origin=origin_id,
                             )
 
-    except AttributeError:
-        print('Raised AttributeError when reading destination from package:')
-        print(p.summary())
-        return (False, False)
-
     except IntegrityError:
-        # Since we are not thread-safe,
-        # we ignore attempts to create duplicate entries
-        pass
+        return (src_interface, False)
+
+    except:
+        print('>>> Exception while reading destination interface:')
+        print('    ' + p.summary() + '\n')
+        raise
+        return (src_interface, False)
 
     return (src_interface, dst_interface)
 
 
 def packet_get_sockets(p, src_interface, dst_interface):
+    """ Extracts the source and destination sockets from a packet and
+        stores or updates this information in the database. """
+
     # Update the sockets
     try:
-        if p[Ether].type == 0x0800:
-            # IPv4
-            src_socket, new_src_socket = Socket.objects.get_or_create(
-                                            interface=src_interface,
-                                            port=p[IP].sport,
-                                            protocol_l4=p[IP].proto
-                                            )
+        assert(p.haslayer('Ether'))
 
-            dst_socket, new_dst_socket = Socket.objects.get_or_create(
-                                            interface=dst_interface,
-                                            port=p[IP].dport,
-                                            protocol_l4=p[IP].proto
-                                            )
+        src_socket, new_src_socket = Socket.objects.get_or_create(
+                                        interface=src_interface,
+                                        port=p.sport,
+                                        protocol_l3=p.type
+                                        )
 
-        elif p[Ether].type == 0x86DD:
-            # IPv6
-            src_socket, new_src_socket = Socket.objects.get_or_create(
-                                            interface=src_interface,
-                                            port=p[IPv6].sport,
-                                            protocol_l4=p[IPv6].nh
-                                            )
-
-            dst_socket, new_dst_socket = Socket.objects.get_or_create(
-                                            interface=dst_interface,
-                                            port=p[IPv6].dport,
-                                            protocol_l4=p[IPv6].nh
-                                            )
-        else:
-            # If we don't understand the protocol skip to the next package
-            return (False, False)
-
-    except AttributeError:
-        print('Raised AttributeError when reading ports from package:')
-        print(p.summary())
-        return (False, False)
+        dst_socket, new_dst_socket = Socket.objects.get_or_create(
+                                        interface=dst_interface,
+                                        port=p.dport,
+                                        protocol_l3=p.type
+                                        )
 
     except IntegrityError:
-        # Since get_or_create is not thread-safe,
-        # we ignore attempts to create duplicate entries
-        pass
+        # Since get_or_create is not thread-safe we try again
+        #src_socket, dst_socket = packet_get_sockets(p, src_interface, dst_interface)
+        return (False, False)
 
-    return (src_socket, dst_socket)
+    except:
+        print('>>> Exception while reading sockets:')
+        print('    ' + p.summary() + '\n')
+        return (False, False)
+
+    else:
+        return (src_socket, dst_socket)
 
 
 def packet_find_dhcp_acks(p):
-    # Find DHCP ACKs
-    if p.sport == 67:
-        try:
-            dhcp_opts = scapy_get_packet_options(p[DHCP].options)
+    """ Finds DHCP ACK packets, derives information about networks and
+        stores or updates this information in the database. """
 
-            if dhcp_opts['message-type'] == 5:
-                # DHCP ACK
-                ip_network = IPNetwork(p[IP].dst)
-                ip_network.prefixlen = sum([bin(int(x)).count('1') for x in
-                                           dhcp_opts['subnet_mask'].split('.')]
-                                           )
+    if p.haslayer('UDP'):
+        if p.sport == 67 and p.dport == 68:
+            try:
+                dhcp_opts = scapy_get_packet_options(p[DHCP].options)
 
-                gateway, new_gateway = \
-                    Interface.objects.get_or_create(
-                        address_inet=dhcp_opts['router'],
-                        net=Net.objects.all()[0]
-                        )
+                if dhcp_opts['message-type'] == 5:
+                    # DHCP ACK
+                    ip_network = IPNetwork(p[IP].dst)
+                    ip_network.prefixlen = sum([bin(int(x)).count('1') for x in
+                                               dhcp_opts['subnet_mask'].split('.')]
+                                               )
 
-                name_server, new_name_server = \
-                    Interface.objects.get_or_create(
-                        address_inet=dhcp_opts['name_server'],
-                        net=Net.objects.all()[0]
-                        )
+                    gateway, new_gateway = \
+                        Interface.objects.get_or_create(
+                            address_inet=dhcp_opts['router'],
+                            net=Net.objects.all()[0]
+                            )
 
-                updated_values_net = {'mask_inet': dhcp_opts['subnet_mask'],
-                                      'address_bcast': p[4].options[6][1],
-                                      'gateway': gateway,
-                                      'name_server': name_server
-                                      }
+                    name_server, new_name_server = \
+                        Interface.objects.get_or_create(
+                            address_inet=dhcp_opts['name_server'],
+                            net=Net.objects.all()[0]
+                            )
 
-                our_net, new_net = Net.objects.update_or_create(
-                                    address_inet=str(ip_network.network),
-                                    defaults=updated_values_net,
-                                    )
-        except AttributeError:
-            print('Raised AttributeError when reading DHCP ACK from package:')
-            print(p.show())
+                    updated_values_net = {'mask_inet': dhcp_opts['subnet_mask'],
+                                          'address_bcast': p[4].options[6][1],
+                                          'gateway': gateway,
+                                          'name_server': name_server
+                                          }
+
+                    our_net, new_net = Net.objects.update_or_create(
+                                        address_inet=str(ip_network.network),
+                                        defaults=updated_values_net,
+                                        )
+
+                    return our_net
+                else:
+                    return False
+
+            except:
+                print('>>> Exception while reading DHCP ACK:')
+                print('    ' + p.summary() + '\n')
+                return False
+
+    return False
 
 
 def packet_find_connections(p, src_socket, dst_socket):
+    """ Extracts connection information from a packet and
+        stores or updates this information in the database. """
+
     # Update the connections
     try:
-        if p[Ether].type == 0x0800:
+        assert(p.haslayer('TCP') or p.haslayer('UDP'))
+
+        if p.haslayer('IP'):
             # IPv4
             proto = p.proto
 
-        elif p[Ether].type == 0x86DD:
+        elif p.haslayer('IPv6'):
             # IPv6
             proto = p.nh
 
         con = Connection.objects.get(
                 Q(src_socket=src_socket) | Q(src_socket=dst_socket),
                 Q(dst_socket=dst_socket) | Q(dst_socket=src_socket),
-                protocol_l567=proto,
+                protocol_l4=proto,
                 closed_flag=False,
                 )
 
@@ -467,12 +581,13 @@ def packet_find_connections(p, src_socket, dst_socket):
 
     except Connection.DoesNotExist:
         if proto == 6:
+            # This is a TCP packet
             if p[TCP].flags & 0x2:
                 # SYN flag is set. The package was sent by the source of the
                 # connection.
                 con = Connection.objects.create(src_socket=src_socket,
                                                 dst_socket=dst_socket,
-                                                protocol_l567=proto,
+                                                protocol_l4=proto,
                                                 first_seen=timezone.now(),
                                                 seq=p.seq,
                                                 syn_flag=True,
@@ -483,14 +598,14 @@ def packet_find_connections(p, src_socket, dst_socket):
                 if p.sport >= p.dport:
                     con = Connection.objects.create(src_socket=src_socket,
                                                     dst_socket=dst_socket,
-                                                    protocol_l567=proto,
+                                                    protocol_l4=proto,
                                                     first_seen=timezone.now(),
                                                     seq=p.seq,
                                                     )
                 else:
                     con = Connection.objects.create(src_socket=dst_socket,
                                                     dst_socket=src_socket,
-                                                    protocol_l567=proto,
+                                                    protocol_l4=proto,
                                                     first_seen=timezone.now(),
                                                     seq=p.seq,
                                                     )
@@ -498,23 +613,23 @@ def packet_find_connections(p, src_socket, dst_socket):
         else:
             con = Connection.objects.create(src_socket=src_socket,
                                             dst_socket=dst_socket,
-                                            protocol_l567=proto,
+                                            protocol_l4=proto,
                                             first_seen=timezone.now(),
                                             )
 
-    except IntegrityError:
-        # Since we are not thread-safe,
-        # we ignore attempts to create duplicate entries
-        pass
+    except:
+        print('>>> Exception while reading connection:')
+        print('    ' + p.summary() + '\n')
+        return False
 
-    except Connection.MultipleObjectsReturned:
-        # This shouldn't happen, but in case it does we will
-        # skip to the next package
-        return
+    else:
+        return con
 
 
 def packet_find_dns_records(p):
-    # Find DNS records
+    """ Finds packets containing DNS RRs, derives information about networks
+        and stores or updates this information in the database. """
+
     if p.sport == 53:
         try:
             updated_values_dnscache = {"name": p[6].rrname,
@@ -524,21 +639,18 @@ def packet_find_dns_records(p):
             DNScache.objects.update_or_create(address_inet=p[6].rdata,
                                               defaults=updated_values_dnscache
                                               )
-        except AttributeError:
-            print('Raised AttributeError when reading DNS answer '
-                  'from package:')
-            print(p.summary())
+        except:
+            print('>>> Exception while reading DNS record:')
+            print('    ' + p.summary() + '\n')
+            return False
 
-        except TypeError:
-            print('Raised TypeError when reading DNS answer from package:')
-            print(p.summary())
-
-        except IndexError:
-            # This was not a DNSRR. Disregard.
-            pass
+        else:
+            return True
 
 
 def scapy_get_packet_options(options):
+    """ Makes scapy packet options available as a dictionary. """
+
     if not type(options) is list:
         return False
     optdict = {}
