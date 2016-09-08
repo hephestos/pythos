@@ -6,7 +6,7 @@ from datetime import datetime
 # import django modules
 from django.utils import timezone
 from django.db.models import Count, Q
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 
 # import third party modules
 from netaddr import IPNetwork
@@ -214,6 +214,7 @@ def identify_systems():
     # TODO identify systems with adjacent mac addresses
 
 
+@transaction.atomic
 def packet_chunk(chunk, origin_id, packets):
     """ Pops packets from a chunk and hands them over to process_packet()
         for processing. """
@@ -263,7 +264,7 @@ def read_pcap(filepath, packets):
           )
 
 
-@profile
+#@profile
 def store_packet(p, origin_id):
     """ Stores a new packet in the database. Only the first 64 bytes
         of the packet are stored. """
@@ -279,20 +280,22 @@ def store_packet(p, origin_id):
                  )
 
 
-@profile     
+#@profile
 def process_unprocessed_packets():
     """ Fetches all stored packets from the database for which the
         processed flag is not set, reassembles a scapy packet object
         and calls process_packet() for each object. """
 
     unprocessed_packets = Packet.objects.all().filter(processed_flag=False,
-                                                      failed_flag=False,)
+                                                      failed_flag=False,
+                                                      ).order_by(
+                                                       'id',
+                                                       )
 
     for pkt_object in unprocessed_packets:
         process_packet(pkt_object)
 
 
-@profile
 def process_packet(pkt_object):
     """ Detects the flavour of the packet and calls the appropriate
         processing functions. """
@@ -316,14 +319,16 @@ def process_packet(pkt_object):
             if p.haslayer('IP'):
                 packet_find_dns_records(p)
                 packet_find_dhcp_acks(p)
-        setattr(pkt_object, 'first_layer', p[0].name)
         setattr(pkt_object, 'processed_flag', True)
     else:
         setattr(pkt_object, 'failed_flag', True)
+        print('>>> Could not process packet from database entry:')
+        print('    ' + p.summary() + '\n')
 
     pkt_object.save()
 
 
+#@profile
 def packet_get_interfaces(p, origin_id):
     """ Extracts the source and destination interfaces from a packet and
         stores or updates this information in the database. """
@@ -366,13 +371,15 @@ def packet_get_interfaces(p, origin_id):
         # else cannot happen because of assertion
 
         setattr(src_interface, 'tx_pkts', src_interface.tx_pkts + 1)
-        setattr(src_interface, 'tx_bytes', src_interface.tx_bytes + p.len)
-        setattr(src_interface, 'ttl_seen', p[IP].ttl)
+#        setattr(src_interface, 'tx_bytes', src_interface.tx_bytes + p.len)
+#        setattr(src_interface, 'ttl_seen', p[IP].ttl)
 
         src_interface.save()
 
     except Interface.DoesNotExist:
+        print(p[Ether].src)
         if p.haslayer('IP'):
+            print(p[IP].src)
             src_interface = Interface.objects.create(
                                 address_ether=p[Ether].src,
                                 address_inet=p[IP].src,
@@ -386,12 +393,14 @@ def packet_get_interfaces(p, origin_id):
             src_interface = Interface.objects.create(
                                 address_ether=p[Ether].src,
                                 tx_pkts=1,
-                                tx_bytes=p.len,
+#                                tx_bytes=p.len,
                                 first_seen=timezone.now(),
                                 origin=origin_id,
                             )
 
     except IntegrityError:
+        print('>>> IntegrityError while reading source interface:')
+        raise
         return (False, False)
 
     except:
@@ -424,7 +433,7 @@ def packet_get_interfaces(p, origin_id):
         # else cannot happen because of assertion
 
         setattr(dst_interface, 'rx_pkts', dst_interface.rx_pkts + 1)
-        setattr(dst_interface, 'rx_bytes', dst_interface.rx_bytes + p.len)
+#        setattr(dst_interface, 'rx_bytes', dst_interface.rx_bytes + p.len)
 
         dst_interface.save()
 
@@ -442,12 +451,13 @@ def packet_get_interfaces(p, origin_id):
             dst_interface = Interface.objects.create(
                                 address_ether=p[Ether].dst,
                                 rx_pkts=1,
-                                rx_bytes=p.len,
+#                                rx_bytes=p.len,
                                 first_seen=timezone.now(),
                                 origin=origin_id,
                             )
 
     except IntegrityError:
+        print('>>> IntegrityError while reading destination interface:')
         return (src_interface, False)
 
     except:

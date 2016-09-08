@@ -100,8 +100,6 @@ def discovery_task(origin_uuid="",
             logging.debug("Processing last chunk.")
             pool.apply(packet_chunk, args=(packets, current_origin, packets))
 
-        time.sleep(10)
-
     pool.close()
     pool.join()
 
