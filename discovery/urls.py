@@ -19,4 +19,6 @@ urlpatterns = [
         url(r'^queries/$', views.QueriesOverviewView, name='queries'),
         # Query: Identification of central systems (many connections to one system)
         url(r'^queries/identifycentralsystems/$', views.QueriesIdentifyCentralSystemsView, name='identifycentralsystems'),
-]
+	# Query: MAC address vendors diagram
+	url(r'^queries/macaddressvendors/$', views.QueriesMacAddressVendorsView, name='macaddressvendors'),
+]       

@@ -2,6 +2,8 @@ from django.shortcuts import render
 from django.views import generic
 from django_tables2 import RequestConfig
 from django.db.models import Sum, Min, Max, Count
+from django.db.models.functions import Substr
+from django.db import connection
 
 from redis import Redis
 from rq import Queue
@@ -12,7 +14,7 @@ from .tasks import discovery_task
 
 from discovery.tables import ConversationsTable
 from discovery.tables import IdentifyCentralSystemsTable
-
+from discovery.tables import MacAddressVendorsTable
 
 # Overview of identified systems
 class IndexView(generic.ListView):
@@ -128,4 +130,25 @@ def QueriesIdentifyCentralSystemsView(request):
         'chartdata_level2' : central_systems_objects_level2
         }
     )
+
+# Quereis: MAC address vendors (diagram)
+def QueriesMacAddressVendorsView(request):
+    # Fetch only vendor part of mac addresses
+    mac_addr = Interface.objects.annotate(vendor_part=Substr('address_ether',1,8))
+    # Count the vendor part of the mac addresses
+    mac_addr = mac_addr.values('vendor_part').annotate(vendor_part_counter=Count('vendor_part')).order_by('-vendor_part_counter')
+
+    # Show output in table
+    table = MacAddressVendorsTable(mac_addr)
+
+    # D3.js graph
+    # TODO: return JSON file for asynchronous updates
+
+    RequestConfig(request).configure(table)
+    return render(request, 'discovery/queriesMacAddressVendors.html', {
+        'table': table,
+        'macs': mac_addr
+        }
+    )
+
 

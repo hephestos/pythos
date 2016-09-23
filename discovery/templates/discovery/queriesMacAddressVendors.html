@@ -1,0 +1,28 @@
+{% load staticfiles %}
+{% load render_table from django_tables2 %}
+<!doctype html>
+<html>
+    <head>
+        <link rel="stylesheet" href="{% static "django_tables2/themes/paleblue/css/screen.css" %}" />
+        <link rel="stylesheet" href="{% static "discovery/d3_js/diagrams/dendrogram.css" %}" />
+
+	<script src="{% static "discovery/d3_js/d3.js" %}"></script>
+
+    </head>
+
+    <body>
+        <h3>MAC address vendors</h3>
+          {% render_table table %}
+
+        <h3>D3.js</h3>
+
+
+	{% for mac in macs %}
+
+		{{ mac.vendor_part }} - {{mac.vendor_part_counter }}<BR>
+
+	{% endfor %}
+
+    </body>
+
+</html>

@@ -1,6 +1,6 @@
 import django_tables2 as tables
 from discovery.models import Connection
-
+from discovery.models import Interface
 
 # These classes are used in views.py
 class ConversationsTable(tables.Table):
@@ -35,4 +35,16 @@ class IdentifyCentralSystemsTable(tables.Table):
                           'dest_ip_counter',
                         ]
                 model = Connection
+                attrs = {"class": "paleblue"}
+
+class MacAddressVendorsTable(tables.Table):
+        vendor_part = tables.Column(accessor='vendor_part')
+        vendor_part_counter = tables.Column(accessor='vendor_part_counter')
+
+        class Meta:
+                fields = [
+                            'vendor_part',
+                            'vendor_part_counter'
+                         ]
+                model = Interface
                 attrs = {"class": "paleblue"}
