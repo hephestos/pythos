@@ -52,6 +52,8 @@ INSTALLED_APPS = (
     'kb',           # System identification (e.g. OS)
     'discovery',    # Capturing network traffic, parse and store relevant data to database
     'config',       # Global configuration (e.g. sites overview, network interfaces)
+    'architecture',
+    'firewall',
 )
 
 # See djangobower in INSTALLED_APPS
@@ -101,7 +103,7 @@ WSGI_APPLICATION = 'pythos.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.mysql',
+        'ENGINE': 'django.db.backends.postgresql_psycopg2',
         'NAME': 'pythos',
         'USER': 'pythos',
         'PASSWORD': 'pythos',

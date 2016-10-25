@@ -8,8 +8,8 @@ class EtherOUI(models.Model):
 
 class ServiceName(models.Model):
         name          = models.CharField(max_length=127)
-        port          = models.IntegerField(db_index=True)
-        protocol_l3   = models.IntegerField(db_index=True)
+        protocol_l3   = models.CharField(max_length=127, db_index=True)
+        port          = models.CharField(max_length=127, null=True, db_index=True)
         description   = models.TextField()
         class Meta:
                 unique_together = (('port','protocol_l3'),)
