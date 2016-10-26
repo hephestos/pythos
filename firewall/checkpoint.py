@@ -2,6 +2,7 @@
 import logging
 import os
 import csv
+from datetime import datetime
 
 # import django modules
 from django.utils import timezone
@@ -12,7 +13,7 @@ from django.db import IntegrityError
 from profilehooks import profile
 
 # import project specific model classes
-from .models import Firewall, Rule, Log, Hit
+from .models import Firewall, RuleSet, Rule, Log, Hit
 from architecture.models import NetObject
 from kb.models import ServiceName
 from kb.models import OperatingSystem
@@ -30,7 +31,6 @@ def checkpoint_read_log_csv(filename):
         if logreader:
             log = Log.objects.create(
                     src_file=filename,
-                    num_entries=0,
                   )
 
         if not HEADERS.issubset(set(logreader.fieldnames)):
@@ -44,6 +44,12 @@ def checkpoint_read_log_csv(filename):
             firewall, new_firewall = Firewall.objects.get_or_create(
                                         name=row['Origin']
                                      )
+
+            ruleset, new_ruleset = RuleSet.objects.get_or_create(
+                                        firewall=firewall,
+                                        description='Derived from logs',
+                                   )
+
             src, new_src = NetObject.objects.get_or_create(
                                 name=row['Source'],
                            )
@@ -63,7 +69,7 @@ def checkpoint_read_log_csv(filename):
                                            )
 
             rule, new_rule = Rule.objects.get_or_create(
-                                firewall=firewall,
+                                ruleset=ruleset,
                                 name=row['Rule Name'],
                                 number=int('0'+row['Rule']),
                                 action=row['Action'],
@@ -79,10 +85,15 @@ def checkpoint_read_log_csv(filename):
                 rule.dsts.add(dst)
 
             hit = Hit.objects.create(
-                    firewall=firewall,
                     log=log,
                     rule=rule,
+                    src=src,
                     src_service=src_service,
+                    dst=dst,
+                    dst_service=dst_service,
+                    hit_time=datetime.strptime(row['Date'] +
+                                               row['Time'], "%d%b%Y%H:%M:%S"),
+                    interface=row['Interface'],
                     user=row['User'],
                     src_machine_name=row['Source Machine Name'],
                     src_user_name=row['Source User Name'],

@@ -18,6 +18,7 @@ from django.contrib import admin
 
 urlpatterns = [
     url(r'^discovery/', include('discovery.urls', namespace="discovery")),
+    url(r'^firewall/', include('firewall.urls', namespace="firewall")),
     url(r'^admin/', include(admin.site.urls)),
 #    url(r'', include('two_factor.urls', 'two_factor')),
 ]
