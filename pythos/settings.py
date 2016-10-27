@@ -43,6 +43,8 @@ INSTALLED_APPS = (
     # custom
     'djangobower',
     'django_tables2',
+    'djangojs',
+    'eztables',
 #    'django_otp',
 #    'django_otp.plugins.otp_static',
 #    'django_otp.plugins.otp_totp',

@@ -1,11 +1,27 @@
 {% load staticfiles %}
 {% load render_table from django_tables2 %}
+{% load eztables %}
+
 <!doctype html>
 <html>
     <head>
         <link rel="stylesheet" href="{% static "django_tables2/themes/paleblue/css/screen.css" %}" />
+        {% datatables_bootstrap_css %}
+
+        {% datatables_js %}
+        {% datatables_bootstrap_js %}
     </head>
     <body>
+        <table id="rules-table">
+        </table>
+
+        <script>
+                $('#rules-table').dataTable({
+                        "bPaginate": true,
+                        "sPaginationType": "bootstrap",
+                        "bScrollCollapse:: true
+                });
+        </script>
         {% render_table table %}
     </body>
 </html>

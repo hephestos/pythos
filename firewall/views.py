@@ -2,6 +2,7 @@ from django.shortcuts import render
 from django.views import generic
 
 from django_tables2 import RequestConfig
+from eztables.views import DatatablesView
 
 from .models import Firewall, RuleSet, Rule
 
