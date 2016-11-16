@@ -31,6 +31,10 @@ class Rule(models.Model):
         def all_dsts(self):
             return ', '.join([x.name for x in self.dsts.all().order_by('name')])
 
+        @property
+        def all_interfaces(self):
+            return ', '.join([x.interface for x in self.hits.all().order_by('interface').distinct('interface')])
+
 
 class Log(models.Model):
         src_file = models.CharField(max_length=256)
