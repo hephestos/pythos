@@ -14,7 +14,7 @@ class Rule(models.Model):
         ruleset = models.ForeignKey('RuleSet', related_name='rules')
         name = models.TextField()
         number = models.IntegerField()
-        action = models.CharField(max_length=6)
+        action = models.CharField(max_length=16)
         services = models.ManyToManyField('kb.ServiceName', related_name='rules')
         srcs = models.ManyToManyField('architecture.NetObject', related_name='src_rules')
         dsts = models.ManyToManyField('architecture.NetObject', related_name='dst_rules')
