@@ -6,6 +6,7 @@ from datetime import datetime
 
 # import django modules
 from django.utils import timezone
+from django.utils.timezone import make_aware, utc
 from django.db.models import Count
 from django.db import IntegrityError
 
@@ -91,8 +92,8 @@ def checkpoint_read_log_csv(filename):
                     src_service=src_service,
                     dst=dst,
                     dst_service=dst_service,
-                    hit_time=datetime.strptime(row['Date'] +
-                                               row['Time'], "%d%b%Y%H:%M:%S"),
+                    hit_time=make_aware(datetime.strptime(row['Date'] +
+                                                          row['Time'], "%d%b%Y%H:%M:%S"), utc),
                     interface=row['Interface'],
                     user=row['User'],
                     src_machine_name=row['Source Machine Name'],
