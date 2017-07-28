@@ -11,7 +11,7 @@ from kb.models import ServiceName
 from firewall.tables import RulesetTable, RuleTable
 
 def ruleset(request, firewall_id, ruleset_id):
-    rules = Rule.objects.filter(ruleset=ruleset_id, ruleset__firewall=firewall_id).annotate(hitcounter=Count('hits')).order_by('number')
+    rules = Rule.objects.filter(ruleset=ruleset_id, ruleset__firewall=firewall_id, disabled=False).annotate(hitcounter=Count('hits')).order_by('number')
     table = RulesetTable(rules)
 #    RequestConfig(request, paginate={'per_page': 50}).configure(table)
     return render(request, 'firewall/ruleset.html', {'table': table})

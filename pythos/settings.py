@@ -35,6 +35,7 @@ ALLOWED_HOSTS = ['localhost']
 INSTALLED_APPS = (
     # default
     'django.contrib.admin',
+    'django.contrib.admindocs',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
@@ -56,6 +57,7 @@ INSTALLED_APPS = (
     'config',       # Global configuration (e.g. sites overview, network interfaces)
     'architecture',
     'firewall',
+    'netflow',
 )
 
 # See djangobower in INSTALLED_APPS

@@ -19,6 +19,8 @@ from django.contrib import admin
 urlpatterns = [
     url(r'^discovery/', include('discovery.urls', namespace="discovery")),
     url(r'^firewall/', include('firewall.urls', namespace="firewall")),
+    url(r'^netflow/', include('netflow.urls', namespace="netflow")),
+    url(r'^admin/doc/', include('django.contrib.admindocs.urls')),
     url(r'^admin/', include(admin.site.urls)),
 #    url(r'', include('two_factor.urls', 'two_factor')),
 ]

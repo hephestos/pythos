@@ -1,20 +1,26 @@
 # import python modules
 import logging
 import os
+import ipaddress
+import csv
+import socket
+import gc
 
 # import django modules
 from django.utils import timezone
-from django.db.models import Count
-from django.db import IntegrityError
+from django.db.models import Count, Q
+from django.db import transaction, IntegrityError
 
 # import third party modules
+from profilehooks import profile
 from netaddr import IPNetwork
 from scapy.all import sniff, Ether
-from profilehooks import profile
 
 # import project specific model classes
-from .models import Interface, Net, Socket, Connection, DNScache
-from kb.models import OperatingSystem
+from .models import System, Interface, Net, Socket, Connection, DNScache
+from architecture.models import Service
+from kb.models import OperatingSystem, Application
+from config.models import Site
 
 
 def guess_gateways_by_connections(threshold):
@@ -125,10 +131,10 @@ def guess_networks_by_broadcasts():
                     if new_netaddr not in known_netaddresses:
                         known_netaddresses.append(new_netaddr)
 
-                        Net.objects.create(address_inet=new_netaddr,
-                                           mask_inet=new_netmask,
-                                           address_bcast=new_bcast,
-                                           )
+                        Net.objects.get_or_create(address_inet=new_netaddr,
+                                                  mask_inet=new_netmask,
+                                                  address_bcast=new_bcast,
+                                                 )
                     break
 
 
@@ -466,3 +472,160 @@ def scapy_get_packet_options(options):
         if type(optlist) is tuple and len(optlist) > 1:
             optdict[optlist[0]] = list(set(optlist[1:]))[0]
     return optdict
+
+
+def import_applications(filename, lookup=False, encoding="latin1"):
+    HEADERS=set(["Application", "Hostname", "IPAddress(v4/v6)", "Description", "PrimaryPort", "SecondaryPort", "ProtocolL4"])
+
+    with open(filename, newline='', encoding=encoding) as appfile:
+        appreader = csv.DictReader(appfile, delimiter=';')
+
+        if not HEADERS.issubset(set(appreader.fieldnames)):
+            raise RuntimeError("The input file does not appear to be a pythos application import file. Quitting.")
+
+        for entry in appreader:
+            if entry["IPAddress(v4/v6)"] == "":
+                if lookup:
+                    try:
+                        ip = socket.gethostbyname(entry["Hostname"])
+                    except:
+                        print("No IP address was given and a DNS lookup of the name '" + entry["Hostname"] + "' failed. Skipping entry.")
+                        continue
+                else:
+                    print("No IP address was given. Skipping entry.")
+                    continue
+            else:
+                ip = entry["IPAddress(v4/v6)"]
+
+            interfaces = Interface.objects.filter(address_inet=ip)
+
+            if interfaces:
+                i = interfaces[0]
+            else:
+                i = Interface.objects.create(address_inet=ip)
+
+            if not i.system:
+                if entry["Hostname"] == "":
+                    try:
+                        entry["Hostname"] = socket.gethostbyaddr(ip)[0]
+                    except:
+                        print("Cannot resolve hostname. Skipping entry.")
+                        continue
+
+                system, new_system = System.objects.get_or_create(
+                                        name=entry["Hostname"],
+                                     )
+                
+                if not new_system and system.description != "":
+                    system.description = system.description + "\n" + entry["Description"]
+                else:
+                    system.description = entry["Description"]
+
+                system.save()
+
+                i.system = system
+                i.save()
+
+            app, new_app = Application.objects.get_or_create(
+                            name=entry["Application"],
+                           )
+
+            if entry["PrimaryPort"] != "":
+                socket1, new_socket1 = Socket.objects.get_or_create(
+                                        interface=i,
+                                        port=entry["PrimaryPort"],
+                                        protocol_l4=entry["ProtocolL4"],
+                                       )
+                app.servers.add(socket1)
+
+            if entry["SecondaryPort"] != "":
+                socket2, new_socket2 = Socket.objects.get_or_create(
+                                        interface=i,
+                                        port=entry["SecondaryPort"],
+                                        protocol_l4=entry["ProtocolL4"],
+                                       )
+                app.servers.add(socket2)
+
+            app.save()
+
+
+def set_interface_attributes(rescan=False):
+    if rescan:
+        interfaces = Interface.objects.all()
+    else:
+        interfaces = Interface.objects.exclude(is_global__isnull=False,
+                                               is_private__isnull=False,
+                                               is_multicast__isnull=False,
+                                               is_unspecified__isnull=False,
+                                               is_reserved__isnull=False,
+                                               is_loopback__isnull=False)
+
+    for i in interfaces:
+        a = ipaddress.ip_interface(i.address_inet)
+
+        i.is_global = a.is_global
+        i.is_private = a.is_private
+        i.is_multicast = a.is_multicast
+        i.is_unspecified = a.is_unspecified
+        i.is_reserved = a.is_reserved
+        i.is_link_local = a.is_link_local
+        i.is_loopback = a.is_loopback
+
+        i.save()
+
+
+def assign_interfaces_to_networks(rescan=False, scan_public=False):
+    if rescan:
+        interfaces = Interface.objects.all()
+    else:
+        interfaces = Interface.objects.filter(net__isnull=True)
+
+    if not scan_public:
+        interfaces = interfaces.exclude(is_private=False)
+
+    for i in interfaces:
+        n = ipaddress.ip_network(i.address_inet)
+
+        if not n.is_private and not scan_public:
+            continue
+
+        while n.prefixlen > 0:
+            subnet = Net.objects.filter(address_inet=str(n.network_address), mask_inet=str(n.netmask))
+
+            if subnet.count() > 0:
+                i.net = subnet[0]
+                break
+            else:
+                n = n.supernet()
+
+        i.save()
+
+
+def queryset_iterator(queryset, chunksize=100000):
+    """
+    Inspired by https://djangosnippets.org/snippets/1949/ (Author: WoLpH)
+    """
+
+    pk = 0
+    queryset = queryset.order_by('pk')
+    last_pk = queryset.last().pk
+
+    while pk < last_pk:
+        for row in queryset.filter(pk__gt=pk)[:chunksize]:
+            pk = row.pk
+            yield row
+        gc.collect()
+
+
+def map_sockets_to_services():
+    sockets = queryset_iterator(Socket.objects.annotate(c=Count('services')).filter(c=0))
+
+    for sock in sockets:
+        services = Service.objects.filter(
+                    proto_l4=sock.protocol_l4,
+                    port_min__lte=sock.port,
+                    port_max__gte=sock.port,
+                   )
+        services = list(services)
+        sock.services.add(*services)
+        sock.save()

@@ -1,32 +1,52 @@
 from django.db import models
 
-# A partition is the highest logical layer in this network architecture.
-# It comprises zones with a similar protection requirement
+
 class Partition(models.Model):
+        """
+        A partition is the highest logical layer in this network architecture.
+        It comprises zones with a similar protection requirement.
+        """
         layer = models.IntegerField(default=0, unique=True)
         name = models.TextField()
 
-# A zone comprises one or several networks and is a member of
-# exaclty one partition
+
 class Zone(models.Model):
+        """
+        A zone comprises one or several networks and is a member of
+        exaclty one :model:`architecture.Partition`.
+        """
         partition = models.ForeignKey('Partition', related_name='zones', null=True)
         name = models.TextField()
 
-# A network object is a member of exaclty one zone. It is an abstraction
-# layer that may represent whole networks or individual hosts. In this context,
-# a host is always an end device (e.g. client or server), but never an
-# intermediary device (e.g. router). It is used for the definition of
-# packet filter rules.
+
 class NetObject(models.Model):
+        """
+        A network object is a member of exaclty one :model:`architecture.Zone`. It is an abstraction
+        layer that may represent whole networks or individual hosts as well as subordinate network objects.
+        It is used for the definition of packet filter rules and thus closely linked to :model:`firewall.Rule`.
+        """
+        children = models.ManyToManyField('self', symmetrical=False, related_name='parents')
         zone = models.ForeignKey('Zone', related_name='netobjects', null=True)
         name = models.TextField()
 
-# Here, a network is a member of excatly one network object
-class Network(models.Model):
-        netobject = models.ForeignKey('NetObject', related_name='networks', null=True)
-        network = models.ForeignKey('discovery.Net', related_name='netobject', null=True)
+        class Meta:
+            unique_together = (('name'),)
 
-# Here, a host is a member of excatly one network object
-class Host(models.Model):
-        netobject = models.ForeignKey('NetObject', related_name='hosts', null=True)
-        host = models.ForeignKey('discovery.System', related_name='netobject', null=True)
+
+class Service(models.Model):
+        """
+#        A service object serves as a grouping layer for services :model:`architecture.Zone`. It is an abstraction
+#        layer that may represent whole networks or individual hosts as well as subordinate network objects.
+#        It is used for the definition of packet filter rules and thus closely linked to :model:`firewall.Rule`.
+        """
+        children = models.ManyToManyField('self', symmetrical=False, related_name='parents')
+        name = models.TextField()
+        description = models.TextField(null=True)
+        category = models.TextField(null=True)
+        proto_l4 = models.IntegerField(null=True)
+        port_min = models.IntegerField(null=True)
+        port_max = models.IntegerField(null=True)
+
+        class Meta:
+            unique_together = (('name'),)
+            index_together = ['proto_l4', 'port_min', 'port_max']

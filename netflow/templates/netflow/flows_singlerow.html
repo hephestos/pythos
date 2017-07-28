@@ -1,0 +1,141 @@
+{% load staticfiles %}
+{% load netflow_extras %}
+{% regroup netflows by dst as flow_list %}
+
+<!doctype html>
+<html>
+    <head>
+        <link rel="stylesheet" href="{% static "django_tables2/themes/paleblue/css/screen.css" %}" />
+	<style type="text/css">
+		table, th, td {
+			border: 1px solid black;
+		}
+		td {
+			vertical-align: top;
+			white-space: nowrap;
+		}
+	</style>
+    </head>
+    <body>
+	<table>
+		<tr>
+			<th>Flow count</th>
+			<th>Protocol (IP)</th>
+			<th>Source IP</th>
+			<th>Source Name</th>
+			<th>Source Port</th>
+			<th>Source Service</th>
+			<th>Source OS</th>
+			<th>Source Site</th>
+			<th>Source Description</th>
+			<th>Destination IP</th>
+			<th>Destination Name</th>
+			<th>Destination Port</th>
+			<th>Destination Service</th>
+			<th>Destination OS</th>
+			<th>Destination Site</th>
+			<th>Destination Description</th>
+		</tr>
+		{% for flow in flow_list %}
+		<tr>
+			<td>
+			{% for src in flow.list %}
+				{{ src.flow_count }}
+				<br />
+			{% endfor %}
+			</td>
+			<td>
+			{% for src in flow.list %}
+				{{ src.src__protocol_l4 }}
+				<br />
+			{% endfor %}
+			</td>
+			<td>
+			{% for src in flow.list %}
+				{{ src.src__interface__address_inet }}
+				<br />
+			{% endfor %}
+			</td>
+			<td>
+			{% for src in flow.list %}
+				{{ src.src__interface__system__name }}
+				<br />
+			{% endfor %}
+			</td>
+			<td>
+			{% for src in flow.list %}
+				{{ src.src__port }}
+				<br />
+			{% endfor %}
+			</td>
+			<td>
+			{% for src in flow.list %}
+				{{ src.src__port|getservbyport }}
+				<br />
+			{% endfor %}
+			</td>
+			<td>
+			{% for src in flow.list %}
+				{{ src.src__interface__system__os__vendor }} {{ src.src__interface__system__os__product }}
+				<br />
+			{% endfor %}
+			</td>
+			<td>
+			{% for src in flow.list %}
+				{{ src.src__interface__net__site__code }} 
+				<br />
+			{% endfor %}
+			</td>
+			<td>
+			{% for src in flow.list %}
+				{{ src.src__interface__system__description }} 
+				<br />
+			{% endfor %}
+			</td>
+			<td>
+			{% for dst in flow.list %}
+				{{ dst.dst__interface__address_inet }}
+				<br />
+			{% endfor %}
+			</td>
+			<td>
+			{% for dst in flow.list %}
+				{{ dst.dst__interface__system__name }}
+				<br />
+			{% endfor %}
+			</td>
+			<td>
+			{% for dst in flow.list %}
+				{{ dst.dst__port }}
+				<br />
+			{% endfor %}
+			</td>
+			<td>
+			{% for dst in flow.list %}
+				{{ dst.dst__port|getservbyport }}
+				<br />
+			{% endfor %}
+			</td>
+			<td>
+			{% for dst in flow.list %}
+				{{ dst.dst__interface__system__os__vendor }} {{ dst.dst__interface__system__os__product }}
+				<br />
+			{% endfor %}
+			</td>
+			<td>
+			{% for dst in flow.list %}
+				{{ dst.dst__interface__net__site__code }} 
+				<br />
+			{% endfor %}
+			</td>
+			<td>
+			{% for dst in flow.list %}
+				{{ dst.dst__interface__system__description }} 
+				<br />
+			{% endfor %}
+			</td>
+		</tr>
+		{% endfor %}
+	</table>
+    </body>
+</html>
